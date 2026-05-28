@@ -1,0 +1,45 @@
+package coresql
+
+import (
+	"context"
+	"database/sql"
+
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/schema"
+	"go.uber.org/fx"
+)
+
+// NewService opens a bun.DB, configures the connection pool, and registers
+// fx lifecycle hooks for Ping (OnStart) and Close (OnStop).
+//
+// The dialect must match the chosen driver; import one of:
+//   - github.com/uptrace/bun/dialect/pgdialect    → pgdialect.New()
+//   - github.com/uptrace/bun/dialect/mysqldialect → mysqldialect.New()
+//   - github.com/uptrace/bun/dialect/sqlitedialect → sqlitedialect.New()
+func NewService(config *Config, dialect schema.Dialect, lc fx.Lifecycle) (*bun.DB, error) {
+	sqldb, err := sql.Open(config.Driver, config.DSN)
+	if err != nil {
+		return nil, err
+	}
+	if config.MaxOpen > 0 {
+		sqldb.SetMaxOpenConns(config.MaxOpen)
+	}
+	if config.MaxIdle > 0 {
+		sqldb.SetMaxIdleConns(config.MaxIdle)
+	}
+	if config.MaxLifetime > 0 {
+		sqldb.SetConnMaxLifetime(config.MaxLifetime)
+	}
+
+	db := bun.NewDB(sqldb, dialect)
+
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			return db.PingContext(ctx)
+		},
+		OnStop: func(ctx context.Context) error {
+			return db.Close()
+		},
+	})
+	return db, nil
+}
