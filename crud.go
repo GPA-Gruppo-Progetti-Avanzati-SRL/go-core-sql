@@ -89,10 +89,10 @@ func GetAllByFilterSorted[T IRecord](ctx context.Context, db bun.IDB, filter IFi
 }
 
 // InsertOne inserts a single record. obj must be a pointer to a struct with bun tags.
+// The table name is derived from the struct name (snake_case) or the bun:"table:..." tag.
+// To use a custom table name, embed bun.BaseModel with the bun:"table:..." tag.
 func InsertOne(ctx context.Context, db bun.IDB, obj IRecord) *core.ApplicationError {
-	table := obj.GetTableName(ctx)
 	if _, err := db.NewInsert().
-		TableExpr("?", bun.Ident(table)).
 		Model(obj).
 		Exec(ctx); err != nil {
 		return core.TechnicalErrorWithError(err)
@@ -101,13 +101,13 @@ func InsertOne(ctx context.Context, db bun.IDB, obj IRecord) *core.ApplicationEr
 }
 
 // InsertMany bulk-inserts records of type T in a single statement.
+// The table name is derived from the struct name (snake_case) or the bun:"table:..." tag.
+// To use a custom table name, embed bun.BaseModel with the bun:"table:..." tag.
 func InsertMany[T IRecord](ctx context.Context, db bun.IDB, objs []*T) *core.ApplicationError {
 	if len(objs) == 0 {
 		return nil
 	}
-	table := (*objs[0]).GetTableName(ctx)
 	if _, err := db.NewInsert().
-		TableExpr("?", bun.Ident(table)).
 		Model(&objs).
 		Exec(ctx); err != nil {
 		return core.TechnicalErrorWithError(err)
