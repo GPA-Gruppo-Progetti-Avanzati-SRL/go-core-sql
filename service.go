@@ -5,6 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/extra/bunotel"
 	"github.com/uptrace/bun/schema"
 	"go.uber.org/fx"
 )
@@ -31,7 +32,11 @@ func NewService(config *Config, dialect schema.Dialect, lc fx.Lifecycle) (*bun.D
 		sqldb.SetConnMaxLifetime(config.MaxLifetime)
 	}
 
-	db := bun.NewDB(sqldb, dialect)
+	db := bun.NewDB(sqldb, dialect).
+		WithQueryHook(bunotel.NewQueryHook(
+			bunotel.WithDBName("db"),
+			bunotel.WithFormattedQueries(true),
+		))
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
