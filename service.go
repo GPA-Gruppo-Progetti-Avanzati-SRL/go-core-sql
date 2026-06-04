@@ -34,7 +34,8 @@ func NewService(config *Config, dialect schema.Dialect, lc fx.Lifecycle) (*bun.D
 
 	db := bun.NewDB(sqldb, dialect).
 		WithQueryHook(bunotel.NewQueryHook(
-			bunotel.WithDBName("db"),
+			//			bunotel.WithDBName(config.),
+
 			bunotel.WithFormattedQueries(true),
 		))
 
