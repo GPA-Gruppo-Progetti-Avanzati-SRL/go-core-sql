@@ -42,8 +42,7 @@ func NewService(config *Config, dialect schema.Dialect, lc fx.Lifecycle) (*bun.D
 
 	db := bun.NewDB(sqldb, dialect).WithQueryHook(
 		bunotel.NewQueryHook(bunotel.WithFormattedQueries(true)),
-	)
-	db.WithQueryHook(&queryLogger{slowDuration: slowDuration})
+	).WithQueryHook(&queryLogger{slowDuration: slowDuration})
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
