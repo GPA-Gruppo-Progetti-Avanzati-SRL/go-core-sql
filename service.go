@@ -3,12 +3,15 @@ package coresql
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/extra/bunotel"
 	"github.com/uptrace/bun/schema"
 	"go.uber.org/fx"
 )
+
+const defaultSlowQuery = time.Second
 
 // NewService opens a bun.DB, configures the connection pool, and registers
 // fx lifecycle hooks for Ping (OnStart) and Close (OnStop).
@@ -32,12 +35,15 @@ func NewService(config *Config, dialect schema.Dialect, lc fx.Lifecycle) (*bun.D
 		sqldb.SetConnMaxLifetime(config.MaxLifetime)
 	}
 
-	db := bun.NewDB(sqldb, dialect).
-		WithQueryHook(bunotel.NewQueryHook(
-			//			bunotel.WithDBName(config.),
+	slowDuration := config.SlowQuery
+	if slowDuration == 0 {
+		slowDuration = defaultSlowQuery
+	}
 
-			bunotel.WithFormattedQueries(true),
-		))
+	db := bun.NewDB(sqldb, dialect).WithQueryHook(
+		bunotel.NewQueryHook(bunotel.WithFormattedQueries(true)),
+	)
+	db.WithQueryHook(&queryLogger{slowDuration: slowDuration})
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {

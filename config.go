@@ -8,4 +8,5 @@ type Config struct {
 	MaxOpen     int           `yaml:"maxOpen" mapstructure:"maxOpen"`
 	MaxIdle     int           `yaml:"maxIdle" mapstructure:"maxIdle"`
 	MaxLifetime time.Duration `yaml:"maxLifetime" mapstructure:"maxLifetime"`
+	SlowQuery   time.Duration `yaml:"slowQuery" mapstructure:"slowQuery"`
 }
