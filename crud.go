@@ -277,3 +277,12 @@ func ExecTransaction(ctx context.Context, db *bun.DB, fn func(ctx context.Contex
 	}
 	return nil
 }
+
+// NextSequenceValue returns the next value from the named PostgreSQL sequence.
+func NextSequenceValue(ctx context.Context, db bun.IDB, seqName string) (int64, *core.ApplicationError) {
+	var id int64
+	if err := db.NewRaw("SELECT nextval(?::regclass)", seqName).Scan(ctx, &id); err != nil {
+		return 0, core.TechnicalErrorWithError(err)
+	}
+	return id, nil
+}
