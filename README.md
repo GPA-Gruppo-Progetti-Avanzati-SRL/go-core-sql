@@ -111,10 +111,8 @@ In sviluppo impostare `LOG_LEVEL=trace` per vedere tutte le query. In produzione
 
 ```go
 core.Supply(&cfg.SQL)
-core.Provides(
-    fx.Annotate(pgdialect.New, fx.As(new(schema.Dialect))),
-    coresql.NewService,
-)
+core.ProvideAs[schema.Dialect](pgdialect.New)
+core.Provide(coresql.NewService)
 ```
 
 **`app-config.go`** — blank import del driver pgx:
