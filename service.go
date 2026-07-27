@@ -20,6 +20,10 @@ const defaultSlowQuery = time.Second
 //   - github.com/uptrace/bun/dialect/pgdialect    → pgdialect.New()
 //   - github.com/uptrace/bun/dialect/mysqldialect → mysqldialect.New()
 //   - github.com/uptrace/bun/dialect/sqlitedialect → sqlitedialect.New()
+//
+// For an Oracle dialect the OffsetFetch workaround is applied automatically
+// (see applyDialectWorkarounds), so LIMIT/OFFSET-based queries generate valid
+// Oracle SQL without any extra call-site wrapping.
 func NewService(config *Config, dialect schema.Dialect, lc fx.Lifecycle) (*bun.DB, error) {
 	sqldb, err := sql.Open(config.Driver, config.DSN)
 	if err != nil {
@@ -40,7 +44,7 @@ func NewService(config *Config, dialect schema.Dialect, lc fx.Lifecycle) (*bun.D
 		slowDuration = defaultSlowQuery
 	}
 
-	db := bun.NewDB(sqldb, dialect).WithQueryHook(
+	db := bun.NewDB(sqldb, applyDialectWorkarounds(dialect)).WithQueryHook(
 		bunotel.NewQueryHook(bunotel.WithFormattedQueries(true)),
 	).WithQueryHook(&queryLogger{slowDuration: slowDuration})
 
