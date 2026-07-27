@@ -14,7 +14,10 @@ type queryLogger struct {
 	slowDuration time.Duration
 }
 
-func (l *queryLogger) BeforeQuery(ctx context.Context, _ *bun.QueryEvent) context.Context {
+func (l *queryLogger) BeforeQuery(ctx context.Context, event *bun.QueryEvent) context.Context {
+	log.Trace().
+		Str("query", event.Query).
+		Msg("bun: query")
 	return ctx
 }
 
@@ -38,8 +41,4 @@ func (l *queryLogger) AfterQuery(_ context.Context, event *bun.QueryEvent) {
 		return
 	}
 
-	log.Trace().
-		Str("query", event.Query).
-		Dur("dur", dur).
-		Msg("bun: query")
 }
