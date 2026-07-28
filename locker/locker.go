@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -21,6 +22,10 @@ import (
 // The lock is a dispatch-dedup optimization (correctness lives in DB claiming),
 // so a modest TTL with a single attempt is intended.
 const DefaultTTL = 30 * time.Second
+
+// defaultRetryDelay is the wait between acquisition attempts when the caller
+// asked to block (Tries > 1) but did not set an explicit RetryDelay.
+const defaultRetryDelay = 100 * time.Millisecond
 
 // lockRow is the lease table. Column lock_key avoids the reserved word "key".
 type lockRow struct {
@@ -48,16 +53,54 @@ func EnsureTable(ctx context.Context, db *bun.DB) error {
 	return err
 }
 
-// Acquire inserts the lease, or on primary-key conflict updates it only when the
-// existing lease is expired. RowsAffected == 0 means the key is held by a live
-// owner → not acquired.
-func (l *sqlLocker) Acquire(ctx context.Context, key string) (lock.Handle, error) {
+// Acquire honours the neutral AcquireOption set: without options it makes a
+// single conditional-upsert attempt (dispatch-dedup); with Tries > 1 it retries
+// on contention (RetryDelay between attempts) until it succeeds, the attempts are
+// exhausted, or the context is done. Expiry overrides the lease TTL.
+func (l *sqlLocker) Acquire(ctx context.Context, key string, opts ...lock.AcquireOption) (lock.Handle, error) {
+	cfg := lock.ResolveAcquireConfig(opts...)
+	ttl := l.ttl
+	if cfg.Expiry > 0 {
+		ttl = cfg.Expiry
+	}
+	tries := cfg.Tries
+	if tries < 1 {
+		tries = 1
+	}
+	delay := cfg.RetryDelay
+	if delay <= 0 {
+		delay = defaultRetryDelay
+	}
+
+	for attempt := 0; ; attempt++ {
+		h, err := l.tryAcquire(ctx, key, ttl)
+		if err == nil {
+			return h, nil
+		}
+		if !errors.Is(err, lock.ErrNotAcquired) {
+			return nil, err
+		}
+		if attempt+1 >= tries {
+			return nil, lock.ErrNotAcquired
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+}
+
+// tryAcquire inserts the lease, or on primary-key conflict updates it only when
+// the existing lease is expired. RowsAffected == 0 means the key is held by a
+// live owner → not acquired.
+func (l *sqlLocker) tryAcquire(ctx context.Context, key string, ttl time.Duration) (lock.Handle, error) {
 	token, err := randToken()
 	if err != nil {
 		return nil, fmt.Errorf("sql lock acquire %q: %w", key, err)
 	}
 	now := time.Now()
-	row := &lockRow{Key: key, Owner: token, ExpiresAt: now.Add(l.ttl)}
+	row := &lockRow{Key: key, Owner: token, ExpiresAt: now.Add(ttl)}
 
 	q := l.db.NewInsert().Model(row)
 	if l.db.Dialect().Name() == dialect.MySQL {
@@ -81,13 +124,14 @@ func (l *sqlLocker) Acquire(ctx context.Context, key string) (lock.Handle, error
 	if n == 0 {
 		return nil, lock.ErrNotAcquired
 	}
-	return &sqlHandle{db: l.db, key: key, token: token}, nil
+	return &sqlHandle{db: l.db, key: key, token: token, ttl: ttl}, nil
 }
 
 type sqlHandle struct {
 	db    *bun.DB
 	key   string
 	token string
+	ttl   time.Duration
 }
 
 // Release deletes the lease only if this owner still holds it.
@@ -98,6 +142,28 @@ func (h *sqlHandle) Release(ctx context.Context) error {
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("sql lock release %q: %w", h.key, err)
+	}
+	return nil
+}
+
+// Extend renews the lease TTL only if this owner still holds it. A lost lease
+// (stolen after expiry, or already released) updates no row and is surfaced as
+// lock.ErrLockLost.
+func (h *sqlHandle) Extend(ctx context.Context) error {
+	res, err := h.db.NewUpdate().Model((*lockRow)(nil)).
+		Set("expires_at = ?", time.Now().Add(h.ttl)).
+		Where("lock_key = ?", h.key).
+		Where("owner = ?", h.token).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("sql lock extend %q: %w", h.key, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sql lock extend %q: %w", h.key, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("sql lock extend %q: %w", h.key, lock.ErrLockLost)
 	}
 	return nil
 }
