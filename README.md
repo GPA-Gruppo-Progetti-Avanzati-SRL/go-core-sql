@@ -8,6 +8,8 @@
 
 Astrazione SQL per GPA basata su [`uptrace/bun`](https://bun.uptrace.dev/). Fornisce CRUD generici tipizzati, filter builder da struct, paginazione, transazioni e integrazione con OpenTelemetry e zerolog. Dialect-agnostic: PostgreSQL, MySQL, SQLite.
 
+**Richiede Go 1.27+**: i CRUD generici sono metodi di `*coresql.Service` (i metodi generici sono una feature Go 1.27).
+
 ## Funzionalità principali
 
 ### IRecord — modello tabella
@@ -44,53 +46,64 @@ func (f PersonFilter) GetFilterTableName(ctx context.Context) string { return "p
 
 **Operatori supportati:** `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `LIKE`, `ILIKE`, `STARTSWITH`, `ENDSWITH`, `CONTAINS`, `IS NULL`, `IS NOT NULL`.
 
-### CRUD generici
+### CRUD generici — metodi del Service
+
+I CRUD sono **metodi generici di `*coresql.Service`** (richiedono Go 1.27+), come in
+go-core-mongo: il Service è l'unico handle SQL dell'applicazione e viene iniettato da fx.
 
 ```go
 // Lettura
-item,  appErr := coresql.GetById[T](ctx, db, id)
-item,  appErr := coresql.GetByFilter[T](ctx, db, filter)
-items, appErr := coresql.GetAllByFilter[T](ctx, db, filter)
-items, appErr := coresql.GetAllByFilterSorted[T](ctx, db, filter, sort)
-items, appErr := coresql.GetPageByFilter[T](ctx, db, filter, paging)
-count, appErr := coresql.CountRows(ctx, db, filter)
+item,  appErr := s.GetById[T](ctx, id)
+item,  appErr := s.GetByFilter[T](ctx, filter)
+items, appErr := s.GetAllByFilter[T](ctx, filter)
+items, appErr := s.GetAllByFilterSorted[T](ctx, filter, sort)
+items, appErr := s.GetPageByFilter[T](ctx, filter, paging)
+count, appErr := s.CountRows(ctx, filter)
 
 // Scrittura
-appErr := coresql.InsertOne(ctx, db, &obj)
-appErr := coresql.InsertMany[T](ctx, db, objs)
-appErr := coresql.UpdateOne(ctx, db, filter, map[string]any{"col": val})
-appErr := coresql.UpdateMany(ctx, db, filter, map[string]any{"col": val}, n)
-appErr := coresql.DeleteOne(ctx, db, filter)
-appErr := coresql.DeleteMany(ctx, db, filter)
+appErr := s.InsertOne(ctx, &obj)
+appErr := s.InsertMany[T](ctx, objs)
+appErr := s.UpdateOne(ctx, filter, map[string]any{"col": val})
+appErr := s.UpdateMany(ctx, filter, map[string]any{"col": val}, n)
+appErr := s.DeleteOne(ctx, filter)
+appErr := s.DeleteMany(ctx, filter)
 
 // PostgreSQL
-id, appErr := coresql.NextSequenceValue(ctx, db, "my_seq")
+id, appErr := s.NextSequenceValue(ctx, "my_seq")
 ```
 
-`db` è `bun.IDB` — funziona sia con `*bun.DB` che con `bun.Tx`.
+Per le query bun native e il DDL: `s.DB()` restituisce il `*bun.DB`, `s.IDB()` il
+destinatario corrente (la `*bun.Tx` dentro `ExecTransaction`).
+
+> **Nota sul linguaggio:** un metodo generico non può implementare un metodo di
+> interfaccia, quindi `*Service` non è assegnabile a un'interfaccia che dichiari
+> questi CRUD. Il data layer dell'app espone i propri metodi concreti (`IData`) e
+> richiama al loro interno i metodi del Service.
 
 ### Transazioni
 
 ```go
-appErr := coresql.ExecTransaction(ctx, db, func(ctx context.Context, tx bun.IDB) error {
-    if appErr := coresql.InsertOne(ctx, tx, &order); appErr != nil {
+appErr := s.ExecTransaction(ctx, func(ctx context.Context, tx *coresql.Service) error {
+    if appErr := tx.InsertOne(ctx, &order); appErr != nil {
         return appErr
     }
-    return coresql.UpdateOne(ctx, tx, stockFilter, map[string]any{"qty": newQty})
+    return tx.UpdateOne(ctx, stockFilter, map[string]any{"qty": newQty})
 })
 ```
 
-`ExecTransaction` richiede `*bun.DB` (non `bun.IDB`).
+Il `*Service` passato a `fn` instrada le query sulla transazione, quindi dentro `fn`
+si usano gli stessi metodi. Attenzione al `*ApplicationError` nil tipizzato: va
+convertito con un `if err != nil { return err }` quando `fn` deve ritornare `nil`.
 
 ### Paginazione e sort
 
 ```go
 paging := page.InitPaging(nil, pageSize, pageNum, 0)
-items, appErr := coresql.GetPageByFilter[T](ctx, db, filter, paging)
+items, appErr := s.GetPageByFilter[T](ctx, filter, paging)
 // paging.TotalCount popolato automaticamente
 
 sort := page.ParseSort("created_at:desc,nome:asc")
-items, appErr := coresql.GetAllByFilterSorted[T](ctx, db, filter, sort)
+items, appErr := s.GetAllByFilterSorted[T](ctx, filter, sort)
 ```
 
 ### Query logging
@@ -110,9 +123,12 @@ In sviluppo impostare `LOG_LEVEL=trace` per vedere tutte le query. In produzione
 **`services/services.go`** (esempio PostgreSQL):
 
 ```go
-core.Supply(&cfg.SQL)
-core.ProvideAs[schema.Dialect](pgdialect.New)
-core.Provide(coresql.NewService)
+// Entry-point unico: supplisce la Config e fornisce *coresql.Service (+ il *bun.DB
+// sottostante, per locker/DDL/query bun native).
+coresql.Module(&cfg.SQL, pgdialect.New())
+
+// Opzionale: gating per core.Mode
+coresql.Module(&cfg.SQL, pgdialect.New(), coresql.WithModes(engine.Api, engine.Batch))
 ```
 
 **`app-config.go`** — blank import del driver pgx:

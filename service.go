@@ -5,50 +5,88 @@ import (
 	"database/sql"
 	"time"
 
+	core "github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/extra/bunotel"
-	"github.com/uptrace/bun/schema"
 	"go.uber.org/fx"
 )
 
 const defaultSlowQuery = time.Second
 
-// NewService opens a bun.DB, configures the connection pool, and registers
-// fx lifecycle hooks for Ping (OnStart) and Close (OnStop).
+// Service è il servizio SQL: possiede il *bun.DB, espone le operazioni CRUD
+// generiche (metodi generici, Go 1.27+) e le transazioni. È l'unico handle SQL
+// dell'applicazione, come *coremongo.Service lo è per Mongo.
 //
-// The dialect must match the chosen driver; import one of:
-//   - github.com/uptrace/bun/dialect/pgdialect    → pgdialect.New()
-//   - github.com/uptrace/bun/dialect/mysqldialect → mysqldialect.New()
-//   - github.com/uptrace/bun/dialect/sqlitedialect → sqlitedialect.New()
+// idb è il destinatario effettivo delle query: coincide con db, tranne nel
+// Service passato a ExecTransaction, dove è la *bun.Tx. Così gli stessi metodi
+// valgono dentro e fuori transazione.
+type Service struct {
+	db  *bun.DB
+	idb bun.IDB
+}
+
+// DB espone l'handle bun sottostante, per le query bun native, il DDL e tutto
+// ciò che non passa dai CRUD generici (es. locker.EnsureTable).
+func (s *Service) DB() *bun.DB { return s.db }
+
+// IDB restituisce il destinatario delle query: la *bun.Tx dentro
+// ExecTransaction, il *bun.DB altrimenti. Serve a chi costruisce query bun a
+// mano e deve rispettare la transazione in corso.
+func (s *Service) IDB() bun.IDB { return s.idb }
+
+// ExecTransaction esegue fn dentro una transazione: rollback su errore, commit
+// al successo. fn riceve un *Service legato alla transazione, quindi al suo
+// interno si usano gli stessi metodi CRUD.
+func (s *Service) ExecTransaction(ctx context.Context, fn func(ctx context.Context, tx *Service) error) *core.ApplicationError {
+	if err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		return fn(ctx, &Service{db: s.db, idb: &tx})
+	}); err != nil {
+		return core.TechnicalErrorWithError(err)
+	}
+	return nil
+}
+
+// serviceParams raccoglie le dipendenze di newService. Il dialect arriva da
+// dialectSource, supplita da Module: è una scelta compile-time dell'app (quale
+// driver/dialect importare), non un valore di configurazione.
+type serviceParams struct {
+	core.In
+	Config    *Config
+	Dialect   dialectSource
+	Lifecycle fx.Lifecycle
+}
+
+// newService apre il *bun.DB, configura il pool e registra gli hook fx di
+// lifecycle (Ping su OnStart, Close su OnStop).
 //
-// For an Oracle dialect the OffsetFetch workaround is applied automatically
-// (see applyDialectWorkarounds), so LIMIT/OFFSET-based queries generate valid
-// Oracle SQL without any extra call-site wrapping.
-func NewService(config *Config, dialect schema.Dialect, lc fx.Lifecycle) (*bun.DB, error) {
-	sqldb, err := sql.Open(config.Driver, config.DSN)
+// Con un dialect Oracle il workaround OffsetFetch è applicato automaticamente
+// (vedi applyDialectWorkarounds), così le query con LIMIT/OFFSET generano SQL
+// valido senza wrapping al call site.
+func newService(p serviceParams) (*Service, error) {
+	sqldb, err := sql.Open(p.Config.Driver, p.Config.DSN)
 	if err != nil {
 		return nil, err
 	}
-	if config.MaxOpen > 0 {
-		sqldb.SetMaxOpenConns(config.MaxOpen)
+	if p.Config.MaxOpen > 0 {
+		sqldb.SetMaxOpenConns(p.Config.MaxOpen)
 	}
-	if config.MaxIdle > 0 {
-		sqldb.SetMaxIdleConns(config.MaxIdle)
+	if p.Config.MaxIdle > 0 {
+		sqldb.SetMaxIdleConns(p.Config.MaxIdle)
 	}
-	if config.MaxLifetime > 0 {
-		sqldb.SetConnMaxLifetime(config.MaxLifetime)
+	if p.Config.MaxLifetime > 0 {
+		sqldb.SetConnMaxLifetime(p.Config.MaxLifetime)
 	}
 
-	slowDuration := config.SlowQuery
+	slowDuration := p.Config.SlowQuery
 	if slowDuration == 0 {
 		slowDuration = defaultSlowQuery
 	}
 
-	db := bun.NewDB(sqldb, applyDialectWorkarounds(dialect)).WithQueryHook(
+	db := bun.NewDB(sqldb, applyDialectWorkarounds(p.Dialect.dialect)).WithQueryHook(
 		bunotel.NewQueryHook(bunotel.WithFormattedQueries(true)),
 	).WithQueryHook(&queryLogger{slowDuration: slowDuration})
 
-	lc.Append(fx.Hook{
+	p.Lifecycle.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			return db.PingContext(ctx)
 		},
@@ -56,5 +94,5 @@ func NewService(config *Config, dialect schema.Dialect, lc fx.Lifecycle) (*bun.D
 			return db.Close()
 		},
 	})
-	return db, nil
+	return &Service{db: db, idb: db}, nil
 }

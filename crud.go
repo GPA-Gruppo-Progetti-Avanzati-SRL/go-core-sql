@@ -12,12 +12,21 @@ import (
 	"github.com/uptrace/bun"
 )
 
+// Le operazioni CRUD generiche sono metodi di *Service (metodi generici, Go 1.27+):
+// il destinatario delle query è s.idb, quindi lo stesso metodo funziona sul
+// *bun.DB o sulla *bun.Tx del Service passato a ExecTransaction.
+//
+// Nota sul linguaggio: un metodo generico non può implementare un metodo di
+// interfaccia, quindi *Service non è assegnabile a un'interfaccia che dichiari
+// questi CRUD. Il data layer dell'app espone i propri metodi concreti (IData) e
+// richiama i metodi del Service al loro interno.
+
 // GetById retrieves a record by its primary key column "id".
 // For custom primary key names use GetByFilter.
-func GetById[T IRecord](ctx context.Context, db bun.IDB, id any) (*T, *core.ApplicationError) {
+func (s *Service) GetById[T IRecord](ctx context.Context, id any) (*T, *core.ApplicationError) {
 	var result T
 	table := result.GetTableName(ctx)
-	err := db.NewSelect().
+	err := s.idb.NewSelect().
 		TableExpr("?", bun.Ident(table)).
 		Where("id = ?", id).
 		Scan(ctx, &result)
@@ -31,14 +40,14 @@ func GetById[T IRecord](ctx context.Context, db bun.IDB, id any) (*T, *core.Appl
 }
 
 // GetByFilter retrieves the first record matching the filter.
-func GetByFilter[T IRecord](ctx context.Context, db bun.IDB, filter IFilter) (*T, *core.ApplicationError) {
+func (s *Service) GetByFilter[T IRecord](ctx context.Context, filter IFilter) (*T, *core.ApplicationError) {
 	var result T
 	table := filter.GetFilterTableName(ctx)
 	where, args, err := buildWhere(filter)
 	if err != nil {
 		return nil, core.TechnicalErrorWithError(err)
 	}
-	if err := db.NewSelect().
+	if err := s.idb.NewSelect().
 		TableExpr("?", bun.Ident(table)).
 		Where(where, args...).
 		Limit(1).
@@ -52,14 +61,14 @@ func GetByFilter[T IRecord](ctx context.Context, db bun.IDB, filter IFilter) (*T
 }
 
 // GetAllByFilter retrieves all records matching the filter.
-func GetAllByFilter[T IRecord](ctx context.Context, db bun.IDB, filter IFilter) ([]*T, *core.ApplicationError) {
+func (s *Service) GetAllByFilter[T IRecord](ctx context.Context, filter IFilter) ([]*T, *core.ApplicationError) {
 	table := filter.GetFilterTableName(ctx)
 	where, args, err := buildWhere(filter)
 	if err != nil {
 		return nil, core.TechnicalErrorWithError(err)
 	}
 	var results []*T
-	if err := db.NewSelect().
+	if err := s.idb.NewSelect().
 		TableExpr("?", bun.Ident(table)).
 		Where(where, args...).
 		Scan(ctx, &results); err != nil {
@@ -69,13 +78,13 @@ func GetAllByFilter[T IRecord](ctx context.Context, db bun.IDB, filter IFilter) 
 }
 
 // GetAllByFilterSorted retrieves all records matching the filter, ordered by sort.
-func GetAllByFilterSorted[T IRecord](ctx context.Context, db bun.IDB, filter IFilter, sort page.SortRequest) ([]*T, *core.ApplicationError) {
+func (s *Service) GetAllByFilterSorted[T IRecord](ctx context.Context, filter IFilter, sort page.SortRequest) ([]*T, *core.ApplicationError) {
 	table := filter.GetFilterTableName(ctx)
 	where, args, err := buildWhere(filter)
 	if err != nil {
 		return nil, core.TechnicalErrorWithError(err)
 	}
-	q := db.NewSelect().
+	q := s.idb.NewSelect().
 		TableExpr("?", bun.Ident(table)).
 		Where(where, args...)
 	if expr := sortExpr(sort); expr != "" {
@@ -91,8 +100,8 @@ func GetAllByFilterSorted[T IRecord](ctx context.Context, db bun.IDB, filter IFi
 // InsertOne inserts a single record. obj must be a pointer to a struct with bun tags.
 // The table name is derived from the struct name (snake_case) or the bun:"table:..." tag.
 // To use a custom table name, embed bun.BaseModel with the bun:"table:..." tag.
-func InsertOne(ctx context.Context, db bun.IDB, obj IRecord) *core.ApplicationError {
-	if _, err := db.NewInsert().
+func (s *Service) InsertOne(ctx context.Context, obj IRecord) *core.ApplicationError {
+	if _, err := s.idb.NewInsert().
 		Model(obj).
 		Exec(ctx); err != nil {
 		return core.TechnicalErrorWithError(err)
@@ -103,11 +112,11 @@ func InsertOne(ctx context.Context, db bun.IDB, obj IRecord) *core.ApplicationEr
 // InsertMany bulk-inserts records of type T in a single statement.
 // The table name is derived from the struct name (snake_case) or the bun:"table:..." tag.
 // To use a custom table name, embed bun.BaseModel with the bun:"table:..." tag.
-func InsertMany[T IRecord](ctx context.Context, db bun.IDB, objs []*T) *core.ApplicationError {
+func (s *Service) InsertMany[T IRecord](ctx context.Context, objs []*T) *core.ApplicationError {
 	if len(objs) == 0 {
 		return nil
 	}
-	if _, err := db.NewInsert().
+	if _, err := s.idb.NewInsert().
 		Model(&objs).
 		Exec(ctx); err != nil {
 		return core.TechnicalErrorWithError(err)
@@ -117,7 +126,7 @@ func InsertMany[T IRecord](ctx context.Context, db bun.IDB, objs []*T) *core.App
 
 // UpdateOne updates a single record matching filter with the given column→value map.
 // Returns an error if the number of affected rows is not exactly 1.
-func UpdateOne(ctx context.Context, db bun.IDB, filter IFilter, set map[string]any) *core.ApplicationError {
+func (s *Service) UpdateOne(ctx context.Context, filter IFilter, set map[string]any) *core.ApplicationError {
 	table := filter.GetFilterTableName(ctx)
 	where, whereArgs, err := buildWhere(filter)
 	if err != nil {
@@ -126,7 +135,7 @@ func UpdateOne(ctx context.Context, db bun.IDB, filter IFilter, set map[string]a
 	if len(set) == 0 {
 		return core.TechnicalErrorWithCodeAndMessage("SQL-EMPTY-SET", "no fields to update")
 	}
-	q := db.NewUpdate().TableExpr("?", bun.Ident(table))
+	q := s.idb.NewUpdate().TableExpr("?", bun.Ident(table))
 	for col, val := range set {
 		q = q.Set("? = ?", bun.Ident(col), val)
 	}
@@ -144,7 +153,7 @@ func UpdateOne(ctx context.Context, db bun.IDB, filter IFilter, set map[string]a
 }
 
 // UpdateMany updates all records matching filter. Returns an error if affected rows ≠ expectedCount.
-func UpdateMany(ctx context.Context, db bun.IDB, filter IFilter, set map[string]any, expectedCount int) *core.ApplicationError {
+func (s *Service) UpdateMany(ctx context.Context, filter IFilter, set map[string]any, expectedCount int) *core.ApplicationError {
 	table := filter.GetFilterTableName(ctx)
 	where, whereArgs, err := buildWhere(filter)
 	if err != nil {
@@ -153,7 +162,7 @@ func UpdateMany(ctx context.Context, db bun.IDB, filter IFilter, set map[string]
 	if len(set) == 0 {
 		return core.TechnicalErrorWithCodeAndMessage("SQL-EMPTY-SET", "no fields to update")
 	}
-	q := db.NewUpdate().TableExpr("?", bun.Ident(table))
+	q := s.idb.NewUpdate().TableExpr("?", bun.Ident(table))
 	for col, val := range set {
 		q = q.Set("? = ?", bun.Ident(col), val)
 	}
@@ -172,13 +181,13 @@ func UpdateMany(ctx context.Context, db bun.IDB, filter IFilter, set map[string]
 
 // DeleteOne deletes the single record matching the filter.
 // Returns NotFoundError if no row was deleted.
-func DeleteOne(ctx context.Context, db bun.IDB, filter IFilter) *core.ApplicationError {
+func (s *Service) DeleteOne(ctx context.Context, filter IFilter) *core.ApplicationError {
 	table := filter.GetFilterTableName(ctx)
 	where, args, err := buildWhere(filter)
 	if err != nil {
 		return core.TechnicalErrorWithError(err)
 	}
-	res, err := db.NewDelete().
+	res, err := s.idb.NewDelete().
 		TableExpr("?", bun.Ident(table)).
 		Where(where, args...).
 		Exec(ctx)
@@ -198,13 +207,13 @@ func DeleteOne(ctx context.Context, db bun.IDB, filter IFilter) *core.Applicatio
 }
 
 // DeleteMany deletes all records matching the filter.
-func DeleteMany(ctx context.Context, db bun.IDB, filter IFilter) *core.ApplicationError {
+func (s *Service) DeleteMany(ctx context.Context, filter IFilter) *core.ApplicationError {
 	table := filter.GetFilterTableName(ctx)
 	where, args, err := buildWhere(filter)
 	if err != nil {
 		return core.TechnicalErrorWithError(err)
 	}
-	if _, err := db.NewDelete().
+	if _, err := s.idb.NewDelete().
 		TableExpr("?", bun.Ident(table)).
 		Where(where, args...).
 		Exec(ctx); err != nil {
@@ -215,13 +224,13 @@ func DeleteMany(ctx context.Context, db bun.IDB, filter IFilter) *core.Applicati
 }
 
 // CountRows counts records matching the filter.
-func CountRows(ctx context.Context, db bun.IDB, filter IFilter) (int64, *core.ApplicationError) {
+func (s *Service) CountRows(ctx context.Context, filter IFilter) (int64, *core.ApplicationError) {
 	table := filter.GetFilterTableName(ctx)
 	where, args, err := buildWhere(filter)
 	if err != nil {
 		return 0, core.TechnicalErrorWithError(err)
 	}
-	count, err := db.NewSelect().
+	count, err := s.idb.NewSelect().
 		TableExpr("?", bun.Ident(table)).
 		Where(where, args...).
 		Count(ctx)
@@ -233,14 +242,14 @@ func CountRows(ctx context.Context, db bun.IDB, filter IFilter) (int64, *core.Ap
 
 // GetPageByFilter returns a paginated set of records matching the filter.
 // paging.SetTotalItems is called so callers can inspect total count.
-func GetPageByFilter[T IRecord](ctx context.Context, db bun.IDB, filter IFilter, paging *page.Paging) ([]T, *core.ApplicationError) {
+func (s *Service) GetPageByFilter[T IRecord](ctx context.Context, filter IFilter, paging *page.Paging) ([]T, *core.ApplicationError) {
 	table := filter.GetFilterTableName(ctx)
 	where, args, err := buildWhere(filter)
 	if err != nil {
 		return nil, core.TechnicalErrorWithError(err)
 	}
 
-	base := db.NewSelect().
+	base := s.idb.NewSelect().
 		TableExpr("?", bun.Ident(table)).
 		Where(where, args...)
 
@@ -266,22 +275,10 @@ func GetPageByFilter[T IRecord](ctx context.Context, db bun.IDB, filter IFilter,
 	return results, nil
 }
 
-// ExecTransaction runs fn inside a database transaction.
-// The transaction is automatically rolled back on error and committed on success.
-// fn receives a bun.IDB so it can call any CRUD helper from this package.
-func ExecTransaction(ctx context.Context, db *bun.DB, fn func(ctx context.Context, tx bun.IDB) error) *core.ApplicationError {
-	if err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		return fn(ctx, &tx)
-	}); err != nil {
-		return core.TechnicalErrorWithError(err)
-	}
-	return nil
-}
-
 // NextSequenceValue returns the next value from the named PostgreSQL sequence.
-func NextSequenceValue(ctx context.Context, db bun.IDB, seqName string) (int64, *core.ApplicationError) {
+func (s *Service) NextSequenceValue(ctx context.Context, seqName string) (int64, *core.ApplicationError) {
 	var id int64
-	if err := db.NewRaw("SELECT nextval(?::regclass)", seqName).Scan(ctx, &id); err != nil {
+	if err := s.idb.NewRaw("SELECT nextval(?::regclass)", seqName).Scan(ctx, &id); err != nil {
 		return 0, core.TechnicalErrorWithError(err)
 	}
 	return id, nil

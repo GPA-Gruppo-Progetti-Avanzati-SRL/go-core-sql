@@ -63,10 +63,7 @@ func (l *sqlLocker) Acquire(ctx context.Context, key string, opts ...lock.Acquir
 	if cfg.Expiry > 0 {
 		ttl = cfg.Expiry
 	}
-	tries := cfg.Tries
-	if tries < 1 {
-		tries = 1
-	}
+	tries := max(cfg.Tries, 1)
 	delay := cfg.RetryDelay
 	if delay <= 0 {
 		delay = defaultRetryDelay
