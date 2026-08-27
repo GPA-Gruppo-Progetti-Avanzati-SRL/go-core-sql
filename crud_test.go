@@ -216,6 +216,11 @@ func TestServiceGetByIdNotFound(t *testing.T) {
 	if appErr.StatusCode != 404 {
 		t.Fatalf("atteso 404, ottenuto %d (%s)", appErr.StatusCode, appErr.Message)
 	}
+	// La causa del driver resta raggiungibile: un chiamante che riceve solo
+	// l'*ApplicationError può ancora distinguere "nessuna riga" da un 404 sintetico.
+	if !errors.Is(appErr, sql.ErrNoRows) {
+		t.Error("NotFoundError deve conservare sql.ErrNoRows come causa")
+	}
 	got := log.last().sql
 	if !strings.Contains(got, "test_records") || !strings.Contains(got, "id = ") {
 		t.Fatalf("SQL inatteso: %s", got)

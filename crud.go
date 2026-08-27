@@ -32,9 +32,9 @@ func (s *Service) GetById[T IRecord](ctx context.Context, id any) (*T, *core.App
 		Scan(ctx, &result)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, core.NotFoundError()
+			return nil, core.NotFoundError().WithCause(err)
 		}
-		return nil, core.TechnicalErrorWithError(err)
+		return nil, core.TechnicalError().WithCause(err)
 	}
 	return &result, nil
 }
@@ -45,7 +45,7 @@ func (s *Service) GetByFilter[T IRecord](ctx context.Context, filter IFilter) (*
 	table := filter.GetFilterTableName(ctx)
 	where, args, err := buildWhere(filter)
 	if err != nil {
-		return nil, core.TechnicalErrorWithError(err)
+		return nil, core.TechnicalError().WithCause(err)
 	}
 	if err := s.idb.NewSelect().
 		TableExpr("?", bun.Ident(table)).
@@ -53,9 +53,9 @@ func (s *Service) GetByFilter[T IRecord](ctx context.Context, filter IFilter) (*
 		Limit(1).
 		Scan(ctx, &result); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, core.NotFoundError()
+			return nil, core.NotFoundError().WithCause(err)
 		}
-		return nil, core.TechnicalErrorWithError(err)
+		return nil, core.TechnicalError().WithCause(err)
 	}
 	return &result, nil
 }
@@ -65,14 +65,14 @@ func (s *Service) GetAllByFilter[T IRecord](ctx context.Context, filter IFilter)
 	table := filter.GetFilterTableName(ctx)
 	where, args, err := buildWhere(filter)
 	if err != nil {
-		return nil, core.TechnicalErrorWithError(err)
+		return nil, core.TechnicalError().WithCause(err)
 	}
 	var results []*T
 	if err := s.idb.NewSelect().
 		TableExpr("?", bun.Ident(table)).
 		Where(where, args...).
 		Scan(ctx, &results); err != nil {
-		return nil, core.TechnicalErrorWithError(err)
+		return nil, core.TechnicalError().WithCause(err)
 	}
 	return results, nil
 }
@@ -82,7 +82,7 @@ func (s *Service) GetAllByFilterSorted[T IRecord](ctx context.Context, filter IF
 	table := filter.GetFilterTableName(ctx)
 	where, args, err := buildWhere(filter)
 	if err != nil {
-		return nil, core.TechnicalErrorWithError(err)
+		return nil, core.TechnicalError().WithCause(err)
 	}
 	q := s.idb.NewSelect().
 		TableExpr("?", bun.Ident(table)).
@@ -92,7 +92,7 @@ func (s *Service) GetAllByFilterSorted[T IRecord](ctx context.Context, filter IF
 	}
 	var results []*T
 	if err := q.Scan(ctx, &results); err != nil {
-		return nil, core.TechnicalErrorWithError(err)
+		return nil, core.TechnicalError().WithCause(err)
 	}
 	return results, nil
 }
@@ -104,7 +104,7 @@ func (s *Service) InsertOne(ctx context.Context, obj IRecord) *core.ApplicationE
 	if _, err := s.idb.NewInsert().
 		Model(obj).
 		Exec(ctx); err != nil {
-		return core.TechnicalErrorWithError(err)
+		return core.TechnicalError().WithCause(err)
 	}
 	return nil
 }
@@ -119,7 +119,7 @@ func (s *Service) InsertMany[T IRecord](ctx context.Context, objs []*T) *core.Ap
 	if _, err := s.idb.NewInsert().
 		Model(&objs).
 		Exec(ctx); err != nil {
-		return core.TechnicalErrorWithError(err)
+		return core.TechnicalError().WithCause(err)
 	}
 	return nil
 }
@@ -130,10 +130,10 @@ func (s *Service) UpdateOne(ctx context.Context, filter IFilter, set map[string]
 	table := filter.GetFilterTableName(ctx)
 	where, whereArgs, err := buildWhere(filter)
 	if err != nil {
-		return core.TechnicalErrorWithError(err)
+		return core.TechnicalError().WithCause(err)
 	}
 	if len(set) == 0 {
-		return core.TechnicalErrorWithCodeAndMessage("SQL-EMPTY-SET", "no fields to update")
+		return core.TechnicalError().WithCode("SQL-EMPTY-SET").WithMessage("no fields to update")
 	}
 	q := s.idb.NewUpdate().TableExpr("?", bun.Ident(table))
 	for col, val := range set {
@@ -142,12 +142,12 @@ func (s *Service) UpdateOne(ctx context.Context, filter IFilter, set map[string]
 	res, err := q.Where(where, whereArgs...).Exec(ctx)
 	if err != nil {
 		log.Error().Err(err).Msgf("UpdateOne failed on %s", table)
-		return core.TechnicalErrorWithError(err)
+		return core.TechnicalError().WithCause(err)
 	}
 	n, _ := res.RowsAffected()
 	if n != 1 {
 		log.Error().Msgf("UpdateOne on %s: expected 1 row, got %d", table, n)
-		return core.TechnicalErrorWithCodeAndMessage("SQL-UPDATE-INC", fmt.Sprintf("expected 1 row updated, got %d", n))
+		return core.TechnicalError().WithCode("SQL-UPDATE-INC").WithMessage(fmt.Sprintf("expected 1 row updated, got %d", n))
 	}
 	return nil
 }
@@ -157,10 +157,10 @@ func (s *Service) UpdateMany(ctx context.Context, filter IFilter, set map[string
 	table := filter.GetFilterTableName(ctx)
 	where, whereArgs, err := buildWhere(filter)
 	if err != nil {
-		return core.TechnicalErrorWithError(err)
+		return core.TechnicalError().WithCause(err)
 	}
 	if len(set) == 0 {
-		return core.TechnicalErrorWithCodeAndMessage("SQL-EMPTY-SET", "no fields to update")
+		return core.TechnicalError().WithCode("SQL-EMPTY-SET").WithMessage("no fields to update")
 	}
 	q := s.idb.NewUpdate().TableExpr("?", bun.Ident(table))
 	for col, val := range set {
@@ -169,12 +169,12 @@ func (s *Service) UpdateMany(ctx context.Context, filter IFilter, set map[string
 	res, err := q.Where(where, whereArgs...).Exec(ctx)
 	if err != nil {
 		log.Error().Err(err).Msgf("UpdateMany failed on %s", table)
-		return core.TechnicalErrorWithError(err)
+		return core.TechnicalError().WithCause(err)
 	}
 	n, _ := res.RowsAffected()
 	if int(n) != expectedCount {
 		log.Error().Msgf("UpdateMany on %s: expected %d rows, got %d", table, expectedCount, n)
-		return core.TechnicalErrorWithCodeAndMessage("SQL-UPDATE-INC", fmt.Sprintf("expected %d rows updated, got %d", expectedCount, n))
+		return core.TechnicalError().WithCode("SQL-UPDATE-INC").WithMessage(fmt.Sprintf("expected %d rows updated, got %d", expectedCount, n))
 	}
 	return nil
 }
@@ -185,7 +185,7 @@ func (s *Service) DeleteOne(ctx context.Context, filter IFilter) *core.Applicati
 	table := filter.GetFilterTableName(ctx)
 	where, args, err := buildWhere(filter)
 	if err != nil {
-		return core.TechnicalErrorWithError(err)
+		return core.TechnicalError().WithCause(err)
 	}
 	res, err := s.idb.NewDelete().
 		TableExpr("?", bun.Ident(table)).
@@ -193,7 +193,7 @@ func (s *Service) DeleteOne(ctx context.Context, filter IFilter) *core.Applicati
 		Exec(ctx)
 	if err != nil {
 		log.Error().Err(err).Msgf("DeleteOne failed on %s", table)
-		return core.TechnicalErrorWithError(err)
+		return core.TechnicalError().WithCause(err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -201,7 +201,7 @@ func (s *Service) DeleteOne(ctx context.Context, filter IFilter) *core.Applicati
 	}
 	if n != 1 {
 		log.Error().Msgf("DeleteOne on %s: affected %d rows", table, n)
-		return core.TechnicalErrorWithCodeAndMessage("SQL-DELETE-INC", fmt.Sprintf("expected 1 row deleted, got %d", n))
+		return core.TechnicalError().WithCode("SQL-DELETE-INC").WithMessage(fmt.Sprintf("expected 1 row deleted, got %d", n))
 	}
 	return nil
 }
@@ -211,14 +211,14 @@ func (s *Service) DeleteMany(ctx context.Context, filter IFilter) *core.Applicat
 	table := filter.GetFilterTableName(ctx)
 	where, args, err := buildWhere(filter)
 	if err != nil {
-		return core.TechnicalErrorWithError(err)
+		return core.TechnicalError().WithCause(err)
 	}
 	if _, err := s.idb.NewDelete().
 		TableExpr("?", bun.Ident(table)).
 		Where(where, args...).
 		Exec(ctx); err != nil {
 		log.Error().Err(err).Msgf("DeleteMany failed on %s", table)
-		return core.TechnicalErrorWithError(err)
+		return core.TechnicalError().WithCause(err)
 	}
 	return nil
 }
@@ -228,14 +228,14 @@ func (s *Service) CountRows(ctx context.Context, filter IFilter) (int64, *core.A
 	table := filter.GetFilterTableName(ctx)
 	where, args, err := buildWhere(filter)
 	if err != nil {
-		return 0, core.TechnicalErrorWithError(err)
+		return 0, core.TechnicalError().WithCause(err)
 	}
 	count, err := s.idb.NewSelect().
 		TableExpr("?", bun.Ident(table)).
 		Where(where, args...).
 		Count(ctx)
 	if err != nil {
-		return 0, core.TechnicalErrorWithError(err)
+		return 0, core.TechnicalError().WithCause(err)
 	}
 	return int64(count), nil
 }
@@ -246,7 +246,7 @@ func (s *Service) GetPageByFilter[T IRecord](ctx context.Context, filter IFilter
 	table := filter.GetFilterTableName(ctx)
 	where, args, err := buildWhere(filter)
 	if err != nil {
-		return nil, core.TechnicalErrorWithError(err)
+		return nil, core.TechnicalError().WithCause(err)
 	}
 
 	base := s.idb.NewSelect().
@@ -255,7 +255,7 @@ func (s *Service) GetPageByFilter[T IRecord](ctx context.Context, filter IFilter
 
 	total, err := base.Count(ctx)
 	if err != nil {
-		return nil, core.TechnicalErrorWithError(err)
+		return nil, core.TechnicalError().WithCause(err)
 	}
 	paging.SetTotalItems(int64(total))
 
@@ -270,7 +270,7 @@ func (s *Service) GetPageByFilter[T IRecord](ctx context.Context, filter IFilter
 
 	var results []T
 	if err := base.Scan(ctx, &results); err != nil {
-		return nil, core.TechnicalErrorWithError(err)
+		return nil, core.TechnicalError().WithCause(err)
 	}
 	return results, nil
 }
@@ -279,7 +279,7 @@ func (s *Service) GetPageByFilter[T IRecord](ctx context.Context, filter IFilter
 func (s *Service) NextSequenceValue(ctx context.Context, seqName string) (int64, *core.ApplicationError) {
 	var id int64
 	if err := s.idb.NewRaw("SELECT nextval(?::regclass)", seqName).Scan(ctx, &id); err != nil {
-		return 0, core.TechnicalErrorWithError(err)
+		return 0, core.TechnicalError().WithCause(err)
 	}
 	return id, nil
 }

@@ -41,7 +41,7 @@ func (s *Service) ExecTransaction(ctx context.Context, fn func(ctx context.Conte
 	if err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		return fn(ctx, &Service{db: s.db, idb: &tx})
 	}); err != nil {
-		return core.TechnicalErrorWithError(err)
+		return core.TechnicalError().WithCause(err)
 	}
 	return nil
 }
