@@ -6,8 +6,10 @@ import (
 	"database/sql/driver"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/uptrace/bun"
@@ -191,11 +193,17 @@ type testFilter struct {
 
 func (testFilter) GetFilterTableName(ctx context.Context) string { return "test_records" }
 
+// stubDriverSeq rende unico il nome del driver a ogni registrazione. Derivarlo dal solo t.Name()
+// bastava con -count=1, ma database/sql.Register PANICA sul nome ripetuto e il registro dei driver
+// è globale al processo: con -count=2 lo stesso test gira due volte e la seconda esplodeva. È un
+// problema di questo helper, non del registry DI di go-core-app.
+var stubDriverSeq atomic.Int64
+
 // newTestService costruisce un Service sullo stub driver, senza lifecycle fx.
 func newTestService(t *testing.T) (*Service, *queryLog) {
 	t.Helper()
 	log := &queryLog{}
-	name := "coresql-stub-" + t.Name()
+	name := "coresql-stub-" + t.Name() + "-" + strconv.FormatInt(stubDriverSeq.Add(1), 10)
 	sql.Register(name, &stubDriver{log: log})
 	sqldb, err := sql.Open(name, "")
 	if err != nil {
