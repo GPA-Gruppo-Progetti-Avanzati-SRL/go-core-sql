@@ -157,6 +157,13 @@ sql:
 | MySQL | `bun/dialect/mysqldialect` + driver MySQL | `mysqldialect.New()` |
 | SQLite | `bun/dialect/sqlitedialect` + `_ "github.com/mattn/go-sqlite3"` | `sqlitedialect.New()` |
 
+## Errori
+
+Catalogo dei codici in **[ERRORI.md](ERRORI.md)**. Ogni errore che nasce dentro la libreria porta
+`Ambit = coresql.Ambit` (`"go-core-sql"`) e un `Code` (`coresql.CodeSelect`, `CodeFilter`, `CodeTransaction`,
+…) invece di presentarsi come un errore dell'applicazione. La causa reale resta raggiungibile con
+`errors.Is`/`errors.As`: `sql.ErrNoRows` è conservato anche dentro un `NotFoundError`.
+
 ## Lock distribuito — `locker`
 
 `locker` implementa il [`lock.Locker`](../go-core-app) neutro di go-core-app su SQL: una tabella di
