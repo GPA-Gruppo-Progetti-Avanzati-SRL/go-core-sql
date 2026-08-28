@@ -156,3 +156,39 @@ sql:
 | PostgreSQL | `bun/dialect/pgdialect` + `_ "github.com/jackc/pgx/v5/stdlib"` | `pgdialect.New()` |
 | MySQL | `bun/dialect/mysqldialect` + driver MySQL | `mysqldialect.New()` |
 | SQLite | `bun/dialect/sqlitedialect` + `_ "github.com/mattn/go-sqlite3"` | `sqlitedialect.New()` |
+
+## Lock distribuito — `locker`
+
+`locker` implementa il [`lock.Locker`](../go-core-app) neutro di go-core-app su SQL: una tabella di
+lease (`scheduler_locks`) con TTL e fencing token, mutua esclusione via UPDATE condizionale. Nessuna
+dipendenza da gocron: è `go-core-batch` ad adattare un `lock.Locker` a gocron, internamente.
+
+```go
+import sqllocker "github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-sql/locker"
+
+coresql.Module(&cfg.SQL, pgdialect.New())
+
+batch.Module(&cfg.Batch, Register,
+    batch.WithStore(storesql.Module),
+    batch.WithLocker(sqllocker.Module),   // sql-only → niente Redis da deployare
+    // ...
+)
+```
+
+`locker.Module(modes ...string)` è **modes-only**: consuma il `*bun.DB` fornito da `coresql.Module`
+e registra `lock.Locker`. La tabella è a carico dell'app — `locker.EnsureTable(ctx, db)` la crea se
+non esiste, in alternativa a una migration.
+
+Senza opzioni `Acquire` fa un solo tentativo non bloccante con TTL di **30s** (`locker.DefaultTTL`)
+e ritorna `lock.ErrNotAcquired` in contesa: è la semantica dispatch-dedup su cui si appoggia lo
+scheduler batch. `lock.WithTries`/`WithRetryDelay`/`WithExpiry` e `Handle.Extend` coprono la mutua
+esclusione di una sezione critica lunga.
+
+## Comandi
+
+```bash
+go build ./...
+go test ./...
+go test -race -count=2 ./...
+go vet ./...
+```
