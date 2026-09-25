@@ -164,32 +164,16 @@ Catalogo dei codici in **[ERRORI.md](ERRORI.md)**. Ogni errore che nasce dentro 
 …) invece di presentarsi come un errore dell'applicazione. La causa reale resta raggiungibile con
 `errors.Is`/`errors.As`: `sql.ErrNoRows` è conservato anche dentro un `NotFoundError`.
 
-## Lock distribuito — `locker`
+## Lock distribuito
 
-`locker` implementa il [`lock.Locker`](../go-core-app) neutro di go-core-app su SQL: una tabella di
-lease (`scheduler_locks`) con TTL e fencing token, mutua esclusione via UPDATE condizionale. Nessuna
-dipendenza da gocron: è `go-core-batch` ad adattare un `lock.Locker` a gocron, internamente.
+Non è più qui: il backend SQL del lock è **`go-core-locker/sqlstore`**, che consuma il
+`*coresql.Service` fornito da questo modulo. `locker.EnsureTable` è diventata
+`sqlstore.EnsureSchema`.
 
 ```go
-import sqllocker "github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-sql/locker"
-
-coresql.Module(&cfg.SQL, pgdialect.New())
-
-batch.Module(&cfg.Batch, Register,
-    batch.WithStore(storesql.Module),
-    batch.WithLocker(sqllocker.Module),   // sql-only → niente Redis da deployare
-    // ...
-)
+coresql.Module(&cfg.Sql, pgdialect.New())
+corelock.Module(&cfg.Lock, corelock.WithBackend(sqlstore.Module))
 ```
-
-`locker.Module(modes ...string)` è **modes-only**: consuma il `*bun.DB` fornito da `coresql.Module`
-e registra `lock.Locker`. La tabella è a carico dell'app — `locker.EnsureTable(ctx, db)` la crea se
-non esiste, in alternativa a una migration.
-
-Senza opzioni `Acquire` fa un solo tentativo non bloccante con TTL di **30s** (`locker.DefaultTTL`)
-e ritorna `lock.ErrNotAcquired` in contesa: è la semantica dispatch-dedup su cui si appoggia lo
-scheduler batch. `lock.WithTries`/`WithRetryDelay`/`WithExpiry` e `Handle.Extend` coprono la mutua
-esclusione di una sezione critica lunga.
 
 ## Comandi
 
