@@ -92,7 +92,7 @@ appErr := s.ExecTransaction(ctx, func(ctx context.Context, tx *coresql.Service) 
 ```
 
 Il `*Service` passato a `fn` instrada le query sulla transazione, quindi dentro `fn`
-si usano gli stessi metodi. Attenzione al `*ApplicationError` nil tipizzato: va
+si usano gli stessi metodi. Attenzione al `*core.Error` nil tipizzato: va
 convertito con un `if err != nil { return err }` quando `fn` deve ritornare `nil`.
 
 ### Paginazione e sort

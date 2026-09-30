@@ -1,8 +1,6 @@
 package coresql
 
-import (
-	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app"
-)
+import "github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app"
 
 // Ambit è la libreria di origine dell'errore. I costruttori di core mettono in Ambit l'AppName,
 // cioè l'applicazione che l'errore lo *riceve*: senza sovrascriverlo un guasto del driver SQL si
@@ -26,7 +24,7 @@ const (
 	CodeDeleteInc   = "SQL-DELETE-INC" // righe cancellate diverse dalle attese
 )
 
-// liberr costruisce tutti gli errori del modulo con codice e libreria di origine (vedi
-// core.Errors): l'ambito è l'unica cosa che si poteva dimenticare su ognuno dei siti di errore, e
+// errs costruisce tutti gli errori del modulo con codice e libreria di origine (vedi
+// core.AmbitErrors): l'ambito è l'unica cosa che si poteva dimenticare su ognuno dei siti di errore, e
 // dimenticarla non rompe niente — semplicemente attribuisce il guasto all'app.
-var liberr = core.Errors{Ambit: Ambit}
+var errs = core.AmbitErrors{Ambit: Ambit}

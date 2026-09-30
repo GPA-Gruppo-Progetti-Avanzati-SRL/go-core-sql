@@ -1,12 +1,12 @@
 # Codici di errore — go-core-sql
 
-I metodi generici di `*coresql.Service` ritornano `*core.ApplicationError`. L'errore di bun /
+I metodi generici di `*coresql.Service` ritornano `*core.Error`. L'errore di bun /
 `database/sql` è sempre allegato come causa: un `sql.ErrNoRows` resta raggiungibile con
 `errors.Is` anche dentro il 404.
 
 > **`Ambit` = `go-core-sql`** (costante `coresql.Ambit`) su ogni errore del modulo: è il campo
 > che dice da quale libreria viene il guasto. I codici sono costanti esportate in `errors.go` e
-> passano tutti da `liberr.Tech(code)` / `liberr.NotFound()` (`liberr = core.Errors{Ambit: Ambit}`).
+> passano tutti da `errs.Tech(code)` / `errs.NotFound()` (`errs = core.AmbitErrors{Ambit: Ambit}`).
 
 ## Codici emessi
 
@@ -39,7 +39,7 @@ I metodi generici di `*coresql.Service` ritornano `*core.ApplicationError`. L'er
 - Ciò che arriva dal database (violazione di vincolo, deadlock, timeout) porta il codice
   dell'**operazione** e il messaggio del driver come causa: il codice dice *cosa stavamo
   facendo*, la causa *cosa è andato storto*.
-- **Trappola nota** in `ExecTransaction`: non ritornare direttamente un `*ApplicationError` nil
+- **Trappola nota** in `ExecTransaction`: non ritornare direttamente un `*core.Error` nil
   tipizzato come `error` — va convertito con un `if`, altrimenti la transazione risulta fallita.
 
 ## Errori sentinella

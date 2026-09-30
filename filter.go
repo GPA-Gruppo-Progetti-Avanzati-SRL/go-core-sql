@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app"
+	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app/utils"
 )
 
 // IFilter is implemented by filter structs used to build SQL WHERE clauses.
@@ -35,9 +35,9 @@ type IFilter interface {
 // Returns "1=1" with no args when no field produces a condition, so the
 // clause is always safe to pass directly to bun's Where() method.
 func buildWhere(f IFilter) (string, []any, error) {
-	// Lo scheletro (nil, puntatore, struct, tag, omitempty) è core.TaggedFields, condiviso col
+	// Lo scheletro (nil, puntatore, struct, tag, omitempty) è utils.TaggedFields, condiviso col
 	// filter builder di go-core-mongo.
-	fields, err := core.TaggedFields(f, "col", "op")
+	fields, err := utils.TaggedFields(f, "col", "op")
 	if err != nil {
 		return "", nil, err
 	}

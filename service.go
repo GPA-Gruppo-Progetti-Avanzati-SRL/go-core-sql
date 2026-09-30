@@ -37,11 +37,11 @@ func (s *Service) IDB() bun.IDB { return s.idb }
 // ExecTransaction esegue fn dentro una transazione: rollback su errore, commit
 // al successo. fn riceve un *Service legato alla transazione, quindi al suo
 // interno si usano gli stessi metodi CRUD.
-func (s *Service) ExecTransaction(ctx context.Context, fn func(ctx context.Context, tx *Service) error) *core.ApplicationError {
+func (s *Service) ExecTransaction(ctx context.Context, fn func(ctx context.Context, tx *Service) error) *core.Error {
 	if err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		return fn(ctx, &Service{db: s.db, idb: &tx})
 	}); err != nil {
-		return liberr.Tech(CodeTransaction).WithCause(err)
+		return errs.Tech(CodeTransaction).WithCause(err)
 	}
 	return nil
 }

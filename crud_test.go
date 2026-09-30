@@ -225,7 +225,7 @@ func TestServiceGetByIdNotFound(t *testing.T) {
 		t.Fatalf("atteso 404, ottenuto %d (%s)", appErr.StatusCode, appErr.Message)
 	}
 	// La causa del driver resta raggiungibile: un chiamante che riceve solo
-	// l'*ApplicationError può ancora distinguere "nessuna riga" da un 404 sintetico.
+	// l'*core.Error può ancora distinguere "nessuna riga" da un 404 sintetico.
 	if !errors.Is(appErr, sql.ErrNoRows) {
 		t.Error("NotFoundError deve conservare sql.ErrNoRows come causa")
 	}
@@ -268,7 +268,7 @@ func TestServiceExecTransactionCommit(t *testing.T) {
 	s, log := newTestService(t)
 
 	appErr := s.ExecTransaction(t.Context(), func(ctx context.Context, tx *Service) error {
-		// Attenzione: *ApplicationError va convertito con un if, non ritornato
+		// Attenzione: *core.Error va convertito con un if, non ritornato
 		// direttamente, altrimenti un nil tipizzato diventa un error non-nil.
 		if err := tx.InsertOne(ctx, &testRecord{Id: "abc"}); err != nil {
 			return err
