@@ -131,6 +131,11 @@ Il query logger è **sempre attivo** — il livello zerolog controlla cosa viene
 
 In sviluppo impostare `LOG_LEVEL=trace` per vedere tutte le query. In produzione (`info` o superiore) vengono loggati solo errori e slow query.
 
+**Errori e slow query portano la query coi segnaposto (`password = ?`), non coi valori**, e lo stesso
+vale per gli span OTel (`bunotel.WithFormattedQueries(false)`): sono i due canali che arrivano in
+produzione, e una query formattata ci portava i parametri — dati personali, hash di password. Il
+testo coi valori resta solo nel log `Trace`, che si accende apposta per fare debug.
+
 ## Setup e configurazione
 
 **`services/services.go`** (esempio PostgreSQL):

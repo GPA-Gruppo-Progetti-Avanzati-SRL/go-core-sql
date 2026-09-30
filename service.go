@@ -82,8 +82,11 @@ func newService(p serviceParams) (*Service, error) {
 		slowDuration = defaultSlowQuery
 	}
 
+	// Negli span va il testo della query con i segnaposto, non con i valori: una query formattata
+	// porta dentro i parametri (email, codici fiscali, hash di password), e il backend di tracing li
+	// conserverebbe con una retention e un controllo d'accesso che non sono quelli del database.
 	db := bun.NewDB(sqldb, applyDialectWorkarounds(p.Dialect.dialect)).WithQueryHook(
-		bunotel.NewQueryHook(bunotel.WithFormattedQueries(true)),
+		bunotel.NewQueryHook(bunotel.WithFormattedQueries(false)),
 	).WithQueryHook(&queryLogger{slowDuration: slowDuration})
 
 	p.Lifecycle.Append(fx.Hook{
