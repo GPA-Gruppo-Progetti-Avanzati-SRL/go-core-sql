@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect"
 	"github.com/uptrace/bun/dialect/feature"
@@ -302,5 +303,29 @@ func TestServiceExecTransactionRollback(t *testing.T) {
 	}
 	if log.commits != 0 || log.rollbacks != 1 {
 		t.Fatalf("atteso rollback, ottenuti %d commit / %d rollback", log.commits, log.rollbacks)
+	}
+}
+
+// TestScrittureConFiltroVuoto: un filtro coi campi omitempty tutti vuoti — query param assenti —
+// non produce condizioni. Per una lettura è "tutto", per una scrittura è un errore: prima
+// UpdateMany/DeleteMany toccavano l'intera tabella e DeleteOne una riga qualsiasi.
+func TestScrittureConFiltroVuoto(t *testing.T) {
+	s, log := newTestService(t)
+	ctx := t.Context()
+	empty := testFilter{}
+	for name, call := range map[string]func() *core.Error{
+		"UpdateOne":  func() *core.Error { return s.UpdateOne(ctx, empty, map[string]any{"status": "x"}) },
+		"UpdateMany": func() *core.Error { return s.UpdateMany(ctx, empty, map[string]any{"status": "x"}, 1) },
+		"DeleteOne":  func() *core.Error { return s.DeleteOne(ctx, empty) },
+		"DeleteMany": func() *core.Error { return s.DeleteMany(ctx, empty) },
+	} {
+		before := len(log.queries)
+		appErr := call()
+		if appErr == nil || appErr.Code != CodeEmptyFilter || appErr.StatusCode != 422 {
+			t.Errorf("%s: atteso %s (422), ottenuto %v", name, CodeEmptyFilter, appErr)
+		}
+		if len(log.queries) != before {
+			t.Errorf("%s: la query è partita comunque: %v", name, log.queries[before:])
+		}
 	}
 }

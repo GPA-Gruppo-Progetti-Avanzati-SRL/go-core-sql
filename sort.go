@@ -1,35 +1,28 @@
 package coresql
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app/page"
+	"github.com/uptrace/bun"
 )
 
-// SortToSQL converts a SortRequest to a full "ORDER BY col ASC, col2 DESC" clause.
-// Returns an empty string when sort is empty.
-func SortToSQL(s page.SortRequest) string {
-	expr := sortExpr(s)
-	if expr == "" {
-		return ""
+// ApplySort aggiunge a q un ORDER BY per ogni campo di s, nell'ordine dato.
+//
+// Ogni colonna passa da bun.Ident, quindi è quotata come identificatore dal dialetto e non
+// interpolata nel SQL, e prima ancora s è validata (page.SortRequest.Validate): il sort arriva di
+// solito da un query param, e la vecchia SortToSQL costruiva la clausola con Sprintf — con
+// `?sort=id;DROP TABLE x` il testo finiva così com'era nella query. Un campo non valido è un
+// errore, non un campo ignorato: un ordinamento diverso da quello chiesto è un risultato sbagliato
+// che nessuno vede.
+func ApplySort(q *bun.SelectQuery, s page.SortRequest) (*bun.SelectQuery, error) {
+	if err := s.Validate(); err != nil {
+		return q, err
 	}
-	return "ORDER BY " + expr
-}
-
-// sortExpr returns the expression part of ORDER BY without the keyword,
-// for use with bun's OrderExpr method.
-func sortExpr(s page.SortRequest) string {
-	if len(s) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(s))
 	for _, f := range s {
-		dir := "ASC"
+		dir := " ASC"
 		if f.Dir == page.Desc {
-			dir = "DESC"
+			dir = " DESC"
 		}
-		parts = append(parts, fmt.Sprintf("%s %s", f.Field, dir))
+		q = q.OrderExpr("?"+dir, bun.Ident(f.Field))
 	}
-	return strings.Join(parts, ", ")
+	return q, nil
 }

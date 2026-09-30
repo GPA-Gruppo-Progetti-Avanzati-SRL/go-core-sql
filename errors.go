@@ -11,17 +11,19 @@ const Ambit = "go-core-sql"
 // diagnosticate dalla libreria; gli altri marcano l'operazione bun/database-sql fallita, con
 // l'errore del driver allegato come causa.
 const (
-	CodeFilter      = "SQL-FILTER"     // buildWhere fallita: tag col/op non validi
-	CodeSelect      = "SQL-SELECT"     // SELECT/Scan fallita
-	CodeCount       = "SQL-COUNT"      // Count fallita
-	CodeInsert      = "SQL-INSERT"     // INSERT fallita
-	CodeUpdate      = "SQL-UPDATE"     // UPDATE fallita
-	CodeDelete      = "SQL-DELETE"     // DELETE fallita
-	CodeTransaction = "SQL-TX"         // RunInTx fallita (o rollback dal callback)
-	CodeSequence    = "SQL-SEQ"        // nextval fallita
-	CodeEmptySet    = "SQL-EMPTY-SET"  // update senza campi: la clausola SET sarebbe vuota
-	CodeUpdateInc   = "SQL-UPDATE-INC" // righe aggiornate diverse dalle attese
-	CodeDeleteInc   = "SQL-DELETE-INC" // righe cancellate diverse dalle attese
+	CodeFilter      = "SQL-FILTER"       // buildWhere fallita: tag col/op non validi
+	CodeSort        = "SQL-SORT"         // campo di sort non valido (non un identificatore)
+	CodeEmptyFilter = "SQL-EMPTY-FILTER" // scrittura con un filtro senza condizioni
+	CodeSelect      = "SQL-SELECT"       // SELECT/Scan fallita
+	CodeCount       = "SQL-COUNT"        // Count fallita
+	CodeInsert      = "SQL-INSERT"       // INSERT fallita
+	CodeUpdate      = "SQL-UPDATE"       // UPDATE fallita
+	CodeDelete      = "SQL-DELETE"       // DELETE fallita
+	CodeTransaction = "SQL-TX"           // RunInTx fallita (o rollback dal callback)
+	CodeSequence    = "SQL-SEQ"          // nextval fallita
+	CodeEmptySet    = "SQL-EMPTY-SET"    // update senza campi: la clausola SET sarebbe vuota
+	CodeUpdateInc   = "SQL-UPDATE-INC"   // righe aggiornate diverse dalle attese
+	CodeDeleteInc   = "SQL-DELETE-INC"   // righe cancellate diverse dalle attese
 )
 
 // errs costruisce tutti gli errori del modulo con codice e libreria di origine (vedi

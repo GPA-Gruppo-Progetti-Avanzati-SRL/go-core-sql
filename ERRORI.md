@@ -13,6 +13,8 @@ I metodi generici di `*coresql.Service` ritornano `*core.Error`. L'errore di bun
 | Codice | HTTP | Costante | Origine | Significato |
 |---|---|---|---|---|
 | `SQL-FILTER` | 500 | `CodeFilter` | `crud.go:48,68,85,133,160,188,214,231,249` | `buildWhere` fallita: tag `col:`/`op:` non validi. Non è un errore del database: la query non è mai partita |
+| `SQL-SORT` | 422 | `CodeSort` | `crud.go` (`GetAllByFilterSorted`), `ApplySort` | campo di sort che non è un identificatore (`page.ValidSortField`): la query non parte. Le colonne del sort sono quotate con `bun.Ident`, mai interpolate |
+| `SQL-EMPTY-FILTER` | 422 | `CodeEmptyFilter` | `crud.go` (`buildWriteWhere`: `UpdateOne`, `UpdateMany`, `DeleteOne`, `DeleteMany`) | il filtro di una scrittura non esprime nessuna condizione (campi `omitempty` tutti vuoti): toccherebbe tutte le righe, quindi la query non parte |
 | `SQL-SELECT` | 500 | `CodeSelect` | `crud.go:37,58,75,95,273` | `SELECT`/`Scan` fallita |
 | `SQL-COUNT` | 500 | `CodeCount` | `crud.go:238,258` | `Count` fallita |
 | `SQL-INSERT` | 500 | `CodeInsert` | `crud.go:107,122` | `INSERT` fallita (violazione di vincolo compresa: il messaggio del driver è la causa) |

@@ -56,9 +56,25 @@ func buildWhere(f IFilter) (string, []any, error) {
 	}
 
 	if len(conditions) == 0 {
-		return "1=1", nil, nil
+		return matchAll, nil, nil
 	}
 	return strings.Join(conditions, " AND "), args, nil
+}
+
+// matchAll è la WHERE di un filtro senza condizioni.
+const matchAll = "1=1"
+
+// likeEscape è il carattere di ESCAPE dei LIKE costruiti da STARTSWITH/ENDSWITH/CONTAINS. Non il
+// backslash: in MySQL, dentro un letterale stringa, andrebbe raddoppiato, e la clausola non sarebbe
+// più la stessa su tutti i dialetti. `!` non ha significato né in SQL né nei pattern LIKE.
+const likeEscape = "!"
+
+// escapeLike rende letterali i caratteri speciali del pattern LIKE (`%`, `_` e il carattere di
+// escape stesso). STARTSWITH/ENDSWITH/CONTAINS confrontano un testo: senza, un `%` o un `_` arrivati
+// da un query param diventavano jolly, e `CONTAINS "%"` selezionava tutte le righe.
+func escapeLike(s string) string {
+	r := strings.NewReplacer(likeEscape, likeEscape+likeEscape, "%", likeEscape+"%", "_", likeEscape+"_")
+	return r.Replace(s)
 }
 
 // Supported operators: =, !=, >, >=, <, <=, IN, NOT IN, LIKE, ILIKE,
@@ -88,6 +104,8 @@ func buildCondition(col, op string, val any) (string, []any, error) {
 		return fmt.Sprintf("%s %s (%s)", col, strings.ToUpper(op), strings.Join(ph, ", ")), a, nil
 
 	case "LIKE", "ILIKE":
+		// LIKE/ILIKE espliciti ricevono un pattern: % e _ restano jolly, per scelta di chi scrive il
+		// filtro. Per confrontare un testo arrivato dall'utente ci sono STARTSWITH/ENDSWITH/CONTAINS.
 		s, ok := val.(string)
 		if !ok {
 			return "", nil, fmt.Errorf("operator %q requires a string", op)
@@ -99,21 +117,21 @@ func buildCondition(col, op string, val any) (string, []any, error) {
 		if !ok {
 			return "", nil, fmt.Errorf("operator STARTSWITH requires a string")
 		}
-		return fmt.Sprintf("%s LIKE ?", col), []any{s + "%"}, nil
+		return fmt.Sprintf("%s LIKE ? ESCAPE '!'", col), []any{escapeLike(s) + "%"}, nil
 
 	case "ENDSWITH":
 		s, ok := val.(string)
 		if !ok {
 			return "", nil, fmt.Errorf("operator ENDSWITH requires a string")
 		}
-		return fmt.Sprintf("%s LIKE ?", col), []any{"%" + s}, nil
+		return fmt.Sprintf("%s LIKE ? ESCAPE '!'", col), []any{"%" + escapeLike(s)}, nil
 
 	case "CONTAINS":
 		s, ok := val.(string)
 		if !ok {
 			return "", nil, fmt.Errorf("operator CONTAINS requires a string")
 		}
-		return fmt.Sprintf("%s LIKE ?", col), []any{"%" + s + "%"}, nil
+		return fmt.Sprintf("%s LIKE ? ESCAPE '!'", col), []any{"%" + escapeLike(s) + "%"}, nil
 
 	case "IS NULL":
 		return fmt.Sprintf("%s IS NULL", col), nil, nil

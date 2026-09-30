@@ -88,8 +88,9 @@ func (s *Service) GetAllByFilterSorted[T IRecord](ctx context.Context, filter IF
 	q := s.idb.NewSelect().
 		TableExpr("?", bun.Ident(table)).
 		Where(where, args...)
-	if expr := sortExpr(sort); expr != "" {
-		q = q.OrderExpr(expr)
+	q, err = ApplySort(q, sort)
+	if err != nil {
+		return nil, errs.Business(CodeSort).WithCause(err)
 	}
 	var results []*T
 	if err := q.Scan(ctx, &results); err != nil {
@@ -129,9 +130,9 @@ func (s *Service) InsertMany[T IRecord](ctx context.Context, objs []*T) *core.Er
 // Returns an error if the number of affected rows is not exactly 1.
 func (s *Service) UpdateOne(ctx context.Context, filter IFilter, set map[string]any) *core.Error {
 	table := filter.GetFilterTableName(ctx)
-	where, whereArgs, err := buildWhere(filter)
-	if err != nil {
-		return errs.Tech(CodeFilter).WithCause(err)
+	where, whereArgs, appErr := buildWriteWhere(filter)
+	if appErr != nil {
+		return appErr
 	}
 	if len(set) == 0 {
 		return errs.Tech(CodeEmptySet).WithMessage("no fields to update")
@@ -156,9 +157,9 @@ func (s *Service) UpdateOne(ctx context.Context, filter IFilter, set map[string]
 // UpdateMany updates all records matching filter. Returns an error if affected rows ≠ expectedCount.
 func (s *Service) UpdateMany(ctx context.Context, filter IFilter, set map[string]any, expectedCount int) *core.Error {
 	table := filter.GetFilterTableName(ctx)
-	where, whereArgs, err := buildWhere(filter)
-	if err != nil {
-		return errs.Tech(CodeFilter).WithCause(err)
+	where, whereArgs, appErr := buildWriteWhere(filter)
+	if appErr != nil {
+		return appErr
 	}
 	if len(set) == 0 {
 		return errs.Tech(CodeEmptySet).WithMessage("no fields to update")
@@ -184,9 +185,9 @@ func (s *Service) UpdateMany(ctx context.Context, filter IFilter, set map[string
 // Returns NotFoundError if no row was deleted.
 func (s *Service) DeleteOne(ctx context.Context, filter IFilter) *core.Error {
 	table := filter.GetFilterTableName(ctx)
-	where, args, err := buildWhere(filter)
-	if err != nil {
-		return errs.Tech(CodeFilter).WithCause(err)
+	where, args, appErr := buildWriteWhere(filter)
+	if appErr != nil {
+		return appErr
 	}
 	res, err := s.idb.NewDelete().
 		TableExpr("?", bun.Ident(table)).
@@ -210,9 +211,9 @@ func (s *Service) DeleteOne(ctx context.Context, filter IFilter) *core.Error {
 // DeleteMany deletes all records matching the filter.
 func (s *Service) DeleteMany(ctx context.Context, filter IFilter) *core.Error {
 	table := filter.GetFilterTableName(ctx)
-	where, args, err := buildWhere(filter)
-	if err != nil {
-		return errs.Tech(CodeFilter).WithCause(err)
+	where, args, appErr := buildWriteWhere(filter)
+	if appErr != nil {
+		return appErr
 	}
 	if _, err := s.idb.NewDelete().
 		TableExpr("?", bun.Ident(table)).
@@ -283,4 +284,21 @@ func (s *Service) NextSequenceValue(ctx context.Context, seqName string) (int64,
 		return 0, errs.Tech(CodeSequence).WithCause(err)
 	}
 	return id, nil
+}
+
+// buildWriteWhere è buildWhere per le scritture (UpdateOne/UpdateMany/DeleteOne/DeleteMany): un
+// filtro che non produce nessuna condizione è un errore, non una WHERE 1=1. Un filtro coi campi
+// tutti `omitempty` e tutti vuoti — tipicamente query param assenti — faceva aggiornare o cancellare
+// l'intera tabella (DeleteOne: una riga qualsiasi). Chi vuole davvero toccare tutte le righe lo
+// scrive con una query bun esplicita.
+func buildWriteWhere(filter IFilter) (string, []any, *core.Error) {
+	where, args, err := buildWhere(filter)
+	if err != nil {
+		return "", nil, errs.Tech(CodeFilter).WithCause(err)
+	}
+	if where == matchAll {
+		return "", nil, errs.Business(CodeEmptyFilter).
+			WithMessage("il filtro non esprime nessuna condizione: la scrittura toccherebbe tutte le righe")
+	}
+	return where, args, nil
 }

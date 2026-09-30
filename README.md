@@ -46,6 +46,17 @@ func (f PersonFilter) GetFilterTableName(ctx context.Context) string { return "p
 
 **Operatori supportati:** `=`, `!=`, `>`, `>=`, `<`, `<=`, `IN`, `NOT IN`, `LIKE`, `ILIKE`, `STARTSWITH`, `ENDSWITH`, `CONTAINS`, `IS NULL`, `IS NOT NULL`.
 
+`STARTSWITH`/`ENDSWITH`/`CONTAINS` confrontano un **testo**: `%` e `_` del valore sono escapati
+(`LIKE ? ESCAPE '!'`, la stessa sintassi su PostgreSQL, MySQL, SQLite e Oracle), quindi
+`CONTAINS "%"` trova le righe che contengono un `%` e non tutte le righe. `LIKE`/`ILIKE` espliciti
+ricevono invece un **pattern**, e `%`/`_` restano jolly.
+
+**Il sort è quotato, non interpolato.** `ApplySort(q, sort)` aggiunge un `ORDER BY` per campo con
+`bun.Ident` (quotato dal dialetto) dopo aver validato che ogni campo sia un identificatore; lo usa
+`GetAllByFilterSorted`. La vecchia `SortToSQL` costruiva la clausola con `Sprintf`, quindi
+`?sort=id;DROP TABLE x` finiva nel SQL così com'era: **è stata rimossa** (breaking) — chi la usava
+passa ad `ApplySort` sulla propria `*bun.SelectQuery`.
+
 ### CRUD generici — metodi del Service
 
 I CRUD sono **metodi generici di `*coresql.Service`** (richiedono Go 1.27+), come in
@@ -67,6 +78,8 @@ appErr := s.UpdateOne(ctx, filter, map[string]any{"col": val})
 appErr := s.UpdateMany(ctx, filter, map[string]any{"col": val}, n)
 appErr := s.DeleteOne(ctx, filter)
 appErr := s.DeleteMany(ctx, filter)
+// UpdateOne/UpdateMany/DeleteOne/DeleteMany con un filtro senza condizioni (campi omitempty tutti
+// vuoti) ritornano SQL-EMPTY-FILTER (422) senza eseguire nulla: prima toccavano tutta la tabella.
 
 // PostgreSQL
 id, appErr := s.NextSequenceValue(ctx, "my_seq")
