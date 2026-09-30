@@ -3,7 +3,7 @@ module github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-sql
 go 1.27.1
 
 require (
-	github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app v0.0.29-0.20260930105232-67b4143d76d8
+	github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app v0.0.29-0.20260930140542-5b06937a5101
 	github.com/rs/zerolog v1.35.1
 	github.com/uptrace/bun v1.2.18
 	github.com/uptrace/bun/extra/bunotel v1.2.18
