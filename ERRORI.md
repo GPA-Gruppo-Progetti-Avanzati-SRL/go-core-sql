@@ -6,7 +6,7 @@ I metodi generici di `*coresql.Service` ritornano `*core.ApplicationError`. L'er
 
 > **`Ambit` = `go-core-sql`** (costante `coresql.Ambit`) su ogni errore del modulo: è il campo
 > che dice da quale libreria viene il guasto. I codici sono costanti esportate in `errors.go` e
-> passano tutti dal costruttore `techErr(code)` / `notFound()`.
+> passano tutti da `liberr.Tech(code)` / `liberr.NotFound()` (`liberr = core.Errors{Ambit: Ambit}`).
 
 ## Codici emessi
 

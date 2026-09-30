@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+
+	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app"
 )
 
 // IFilter is implemented by filter structs used to build SQL WHERE clauses.
@@ -33,39 +35,19 @@ type IFilter interface {
 // Returns "1=1" with no args when no field produces a condition, so the
 // clause is always safe to pass directly to bun's Where() method.
 func buildWhere(f IFilter) (string, []any, error) {
-	if f == nil {
-		return "", nil, fmt.Errorf("filter cannot be nil")
-	}
-	val := reflect.ValueOf(f)
-	typ := reflect.TypeOf(f)
-	if typ.Kind() == reflect.Pointer {
-		if val.IsNil() {
-			return "", nil, fmt.Errorf("filter cannot be a nil pointer")
-		}
-		val = val.Elem()
-		typ = val.Type()
-	}
-	if typ.Kind() != reflect.Struct {
-		return "", nil, fmt.Errorf("filter must be a struct")
+	// Lo scheletro (nil, puntatore, struct, tag, omitempty) è core.TaggedFields, condiviso col
+	// filter builder di go-core-mongo.
+	fields, err := core.TaggedFields(f, "col", "op")
+	if err != nil {
+		return "", nil, err
 	}
 
 	var conditions []string
 	var args []any
 
-	for i := range typ.NumField() {
-		field := typ.Field(i)
-		fieldVal := val.Field(i)
-
-		col := field.Tag.Get("col")
-		op := field.Tag.Get("op")
-		if col == "" || op == "" {
-			continue
-		}
-		if _, hasOmit := field.Tag.Lookup("omitempty"); hasOmit && fieldVal.IsZero() {
-			continue
-		}
-
-		cond, condArgs, err := buildCondition(col, op, fieldVal.Interface())
+	for _, tf := range fields {
+		col, op := tf.Key, tf.Op
+		cond, condArgs, err := buildCondition(col, op, tf.Value)
 		if err != nil {
 			return "", nil, fmt.Errorf("field %q op %q: %w", col, op, err)
 		}
