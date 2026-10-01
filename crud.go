@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app"
 
@@ -146,8 +147,16 @@ func (s *Service) UpdateOne(ctx context.Context, filter IFilter, set map[string]
 		log.Error().Err(err).Msgf("UpdateOne failed on %s", table)
 		return errs.Tech(CodeUpdate).WithCause(err)
 	}
+	// Nessuna riga è un 404, come in DeleteOne: prima era un 500 SQL-UPDATE-INC, cioè un guasto del
+	// server per un id che non esiste. Più di una riga resta un'incoerenza: il filtro non era univoco.
+	// NB: su MySQL RowsAffected conta le righe CAMBIATE, non quelle trovate, quindi un update che
+	// riscrive gli stessi valori dà 0 — il DSN va aperto con clientFoundRows=true. PostgreSQL e
+	// SQLite contano le righe trovate.
 	n, _ := res.RowsAffected()
-	if n != 1 {
+	switch {
+	case n == 0:
+		return errs.NotFound()
+	case n != 1:
 		log.Error().Msgf("UpdateOne on %s: expected 1 row, got %d", table, n)
 		return errs.Tech(CodeUpdateInc).WithMessage(fmt.Sprintf("expected 1 row updated, got %d", n))
 	}
@@ -267,6 +276,12 @@ func (s *Service) GetPageByFilter[T IRecord](ctx context.Context, filter IFilter
 	}
 
 	if offset >= 0 {
+		// OFFSET/LIMIT su un ordine non dichiarato non pagina: il database non garantisce lo stesso
+		// ordine fra due query, e due pagine possono ripetere o saltare righe. Si ordina per chiave
+		// primaria, che bun conosce dal modello (e Oracle, con OFFSET FETCH, un ORDER BY lo pretende).
+		for _, pk := range s.db.Table(reflect.TypeFor[T]()).PKs {
+			base = base.OrderExpr("? ASC", bun.Ident(pk.Name))
+		}
 		base = base.Offset(offset).Limit(paging.PageSize)
 	}
 

@@ -80,6 +80,9 @@ appErr := s.DeleteOne(ctx, filter)
 appErr := s.DeleteMany(ctx, filter)
 // UpdateOne/UpdateMany/DeleteOne/DeleteMany con un filtro senza condizioni (campi omitempty tutti
 // vuoti) ritornano SQL-EMPTY-FILTER (422) senza eseguire nulla: prima toccavano tutta la tabella.
+// UpdateOne su zero righe è un 404 (prima un 500 SQL-UPDATE-INC); più di una riga resta SQL-UPDATE-INC.
+// Su MySQL RowsAffected conta le righe CAMBIATE: un update idempotente dà 0, quindi il DSN va aperto
+// con clientFoundRows=true. PostgreSQL e SQLite contano le righe trovate.
 
 // PostgreSQL
 id, appErr := s.NextSequenceValue(ctx, "my_seq")
@@ -113,7 +116,8 @@ convertito con un `if err != nil { return err }` quando `fn` deve ritornare `nil
 ```go
 paging := page.InitPaging(nil, pageSize, pageNum, 0)
 items, appErr := s.GetPageByFilter[T](ctx, filter, paging)
-// paging.TotalCount popolato automaticamente
+// paging.TotalCount popolato automaticamente; le pagine sono ordinate per chiave primaria (dal modello
+// bun di T): OFFSET/LIMIT senza ORDER BY non pagina, e Oracle (OFFSET FETCH) l'ORDER BY lo pretende
 
 sort := page.ParseSort("created_at:desc,nome:asc")
 items, appErr := s.GetAllByFilterSorted[T](ctx, filter, sort)

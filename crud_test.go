@@ -13,9 +13,11 @@ import (
 	"testing"
 
 	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app"
+	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app/page"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect"
 	"github.com/uptrace/bun/dialect/feature"
+	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"github.com/uptrace/bun/schema"
 )
 
@@ -327,5 +329,87 @@ func TestScrittureConFiltroVuoto(t *testing.T) {
 		if len(log.queries) != before {
 			t.Errorf("%s: la query è partita comunque: %v", name, log.queries[before:])
 		}
+	}
+}
+
+type persona struct {
+	bun.BaseModel `bun:"table:persone"`
+	Id            string `bun:"id,pk"`
+	Nome          string `bun:"nome"`
+}
+
+func (persona) GetTableName(context.Context) string { return "persone" }
+
+type personaPerId struct {
+	Id string `col:"id" op:"=" omitempty:"true"`
+}
+
+func (personaPerId) GetFilterTableName(context.Context) string { return "persone" }
+
+type tutteLePersone struct {
+	Nome string `col:"nome" op:"=" omitempty:"true"`
+}
+
+func (tutteLePersone) GetFilterTableName(context.Context) string { return "persone" }
+
+func sqliteService(t *testing.T) *Service {
+	t.Helper()
+	sqldb, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqldb.SetMaxOpenConns(1) // :memory: è per connessione
+	t.Cleanup(func() {
+		if err := sqldb.Close(); err != nil {
+			t.Logf("close: %v", err)
+		}
+	})
+	db := bun.NewDB(sqldb, sqlitedialect.New())
+	if _, err := db.NewCreateTable().Model((*persona)(nil)).Exec(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	return &Service{db: db, idb: db}
+}
+
+// Nessuna riga aggiornata è un 404, non un 500: l'id non esiste. Un update che riscrive gli stessi
+// valori resta un successo (SQLite e PostgreSQL contano le righe trovate).
+func TestUpdateOne_NonTrovatoEIdempotente(t *testing.T) {
+	s := sqliteService(t)
+	ctx := t.Context()
+	if err := s.InsertOne(ctx, &persona{Id: "p1", Nome: "Ada"}); err != nil {
+		t.Fatal(err.Message)
+	}
+	for i := range 2 {
+		if err := s.UpdateOne(ctx, personaPerId{Id: "p1"}, map[string]any{"nome": "Ada"}); err != nil {
+			t.Fatalf("UpdateOne #%d: %v", i+1, err)
+		}
+	}
+	if err := s.UpdateOne(ctx, personaPerId{Id: "nessuno"}, map[string]any{"nome": "x"}); err == nil || err.StatusCode != 404 {
+		t.Fatalf("UpdateOne su una riga assente: %v, atteso 404", err)
+	}
+}
+
+// Le pagine sono ordinate per chiave primaria: senza ORDER BY due pagine possono ripetere o saltare
+// righe.
+func TestGetPageByFilter_OrdinePerChiave(t *testing.T) {
+	s := sqliteService(t)
+	ctx := t.Context()
+	for _, id := range []string{"e", "b", "d", "a", "c"} {
+		if err := s.InsertOne(ctx, &persona{Id: id, Nome: "x"}); err != nil {
+			t.Fatal(err.Message)
+		}
+	}
+	var visti []string
+	for pagina := 1; pagina <= 3; pagina++ {
+		out, err := s.GetPageByFilter[persona](ctx, tutteLePersone{}, &page.Paging{CurrentPage: pagina, PageSize: 2})
+		if err != nil {
+			t.Fatalf("pagina %d: %v", pagina, err)
+		}
+		for _, o := range out {
+			visti = append(visti, o.Id)
+		}
+	}
+	if strings.Join(visti, "") != "abcde" {
+		t.Fatalf("righe per pagina = %v, attese a..e in ordine", visti)
 	}
 }

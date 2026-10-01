@@ -23,7 +23,7 @@ I metodi generici di `*coresql.Service` ritornano `*core.Error`. L'errore di bun
 | `SQL-TX` | 500 | `CodeTransaction` | `service.go:44` | `RunInTx` fallita, o rollback provocato dal callback |
 | `SQL-SEQ` | 500 | `CodeSequence` | `crud.go:282` | `nextval` fallita |
 | `SQL-EMPTY-SET` | 500 | `CodeEmptySet` | `crud.go:136,163` | nessun campo da aggiornare: la clausola `SET` sarebbe vuota. Errore di costruzione della query, non del DB |
-| `SQL-UPDATE-INC` | 500 | `CodeUpdateInc` | `crud.go:150,177` | **update incoerente**: righe aggiornate diverse dalle attese (1, o `expectedCount`) |
+| `SQL-UPDATE-INC` | 500 | `CodeUpdateInc` | `crud.go` (`UpdateOne`, `UpdateMany`) | **update incoerente**: `UpdateOne` che ha toccato più di una riga, `UpdateMany` diverso da `expectedCount`. `UpdateOne` su **zero** righe è `NOT-FOUND` (404) dal 2026-10-01 |
 | `SQL-DELETE-INC` | 500 | `CodeDeleteInc` | `crud.go:204` | **delete incoerente**: righe cancellate diverse da 1 |
 | `NOT-FOUND` | 404 | — | `crud.go:35,56` | `sql.ErrNoRows` in `GetById`/`GetByFilter`, allegato come causa |
 | `NOT-FOUND` | 404 | — | `crud.go:200` | delete che non ha toccato nessuna riga |
