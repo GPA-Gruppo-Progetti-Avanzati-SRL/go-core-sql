@@ -268,7 +268,7 @@ func (s *Service) GetPageByFilter[T IRecord](ctx context.Context, filter IFilter
 	if err != nil {
 		return nil, errs.Tech(CodeCount).WithCause(err)
 	}
-	paging.SetTotalItems(int64(total))
+	paging.SetTotalItems(total)
 
 	offset, appErr := paging.Paging()
 	if appErr != nil {
@@ -282,7 +282,7 @@ func (s *Service) GetPageByFilter[T IRecord](ctx context.Context, filter IFilter
 		for _, pk := range s.db.Table(reflect.TypeFor[T]()).PKs {
 			base = base.OrderExpr("? ASC", bun.Ident(pk.Name))
 		}
-		base = base.Offset(offset).Limit(paging.PageSize)
+		base = base.Offset(int64(offset)).Limit(int64(paging.PageSize))
 	}
 
 	var results []T
