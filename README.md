@@ -177,7 +177,7 @@ sql:
 |---------|--------|-------------|
 | PostgreSQL | `bun/dialect/pgdialect` + `_ "github.com/jackc/pgx/v5/stdlib"` | `pgdialect.New()` |
 | MySQL | `bun/dialect/mysqldialect` + driver MySQL | `mysqldialect.New()` |
-| SQLite | `bun/dialect/sqlitedialect` + `_ "github.com/mattn/go-sqlite3"` | `sqlitedialect.New()` |
+| SQLite | `bun/dialect/sqlitedialect` + `_ "modernc.org/sqlite"` (puro Go, `driver: sqlite`; è quello dei test della libreria — `mattn/go-sqlite3` funziona ma richiede CGo e `driver: sqlite3`) | `sqlitedialect.New()` |
 
 ## Errori
 
