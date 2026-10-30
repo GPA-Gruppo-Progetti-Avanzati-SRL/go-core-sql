@@ -12,6 +12,7 @@ import (
 	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app/page"
 	"github.com/rs/zerolog/log"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect"
 )
 
 // Le operazioni CRUD generiche sono metodi di *Service (metodi generici, Go 1.27+):
@@ -119,9 +120,43 @@ func (s *Service) InsertMany[T IRecord](ctx context.Context, objs []*T) *core.Er
 	if len(objs) == 0 {
 		return nil
 	}
+	if s.idb.Dialect().Name() == dialect.Oracle {
+		return s.insertEach(ctx, len(objs), func(ctx context.Context, idb bun.IDB, i int) error {
+			_, err := idb.NewInsert().Model(objs[i]).Exec(ctx)
+			return err
+		})
+	}
 	if _, err := s.idb.NewInsert().
 		Model(&objs).
 		Exec(ctx); err != nil {
+		return errs.Tech(CodeInsert).WithCause(err)
+	}
+	return nil
+}
+
+// insertEach esegue n INSERT di una riga ciascuno, tutti o nessuno.
+//
+// Serve a Oracle: fino alla 19c non accetta l'INSERT multi-riga `VALUES (..), (..)` che bun emette
+// per una slice (ORA-00933), e la 19c è la versione minima supportata. Fuori da una transazione ne
+// apre una, così InsertMany resta atomica come sugli altri dialetti; dentro ExecTransaction usa
+// quella del chiamante — senza savepoint, perché Oracle non ha RELEASE SAVEPOINT, che bun emette
+// per una transazione annidata.
+func (s *Service) insertEach(ctx context.Context, n int, insert func(ctx context.Context, idb bun.IDB, i int) error) *core.Error {
+	run := func(ctx context.Context, idb bun.IDB) error {
+		for i := range n {
+			if err := insert(ctx, idb, i); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	var err error
+	if s.idb != bun.IDB(s.db) {
+		err = run(ctx, s.idb)
+	} else {
+		err = s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error { return run(ctx, tx) })
+	}
+	if err != nil {
 		return errs.Tech(CodeInsert).WithCause(err)
 	}
 	return nil

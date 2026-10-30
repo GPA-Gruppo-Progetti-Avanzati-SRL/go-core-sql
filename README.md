@@ -73,7 +73,7 @@ count, appErr := s.CountRows(ctx, filter)
 
 // Scrittura
 appErr := s.InsertOne(ctx, &obj)
-appErr := s.InsertMany[T](ctx, objs)
+appErr := s.InsertMany[T](ctx, objs)   // su Oracle: un INSERT per riga, in transazione (vedi sotto)
 appErr := s.UpdateOne(ctx, filter, map[string]any{"col": val})
 appErr := s.UpdateMany(ctx, filter, map[string]any{"col": val}, n)
 appErr := s.DeleteOne(ctx, filter)
@@ -87,6 +87,13 @@ appErr := s.DeleteMany(ctx, filter)
 // PostgreSQL
 id, appErr := s.NextSequenceValue(ctx, "my_seq")
 ```
+
+**`InsertMany` su Oracle.** Fino alla 19c Oracle rifiuta l'INSERT multi-riga `VALUES (..), (..)`
+che bun emette per una slice (`ORA-00933`). Con un dialetto Oracle `InsertMany` fa quindi un INSERT
+per riga dentro una transazione — quella del chiamante se è dentro `ExecTransaction`, senza
+savepoint perché Oracle non ha `RELEASE SAVEPOINT` — così resta atomica come sugli altri dialetti.
+Resta il limite di bun su Oracle: gli argomenti sono interpolati come letterali, e un testo oltre
+i 4000 byte fallisce (`ORA-01704`); per valori lunghi serve un INSERT con bind del driver.
 
 Per le query bun native e il DDL: `s.DB()` restituisce il `*bun.DB`, `s.IDB()` il
 destinatario corrente (la `*bun.Tx` dentro `ExecTransaction`).

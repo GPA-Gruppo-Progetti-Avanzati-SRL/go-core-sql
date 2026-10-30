@@ -162,6 +162,7 @@ func (r *stubRows) Next(dest []driver.Value) error {
 type stubDialect struct {
 	schema.BaseDialect
 	tables *schema.Tables
+	name   dialect.Name // Invalid (zero) = SQLite
 }
 
 func newStubDialect() *stubDialect {
@@ -170,8 +171,13 @@ func newStubDialect() *stubDialect {
 	return d
 }
 
-func (d *stubDialect) Init(*sql.DB)                                               {}
-func (d *stubDialect) Name() dialect.Name                                         { return dialect.SQLite }
+func (d *stubDialect) Init(*sql.DB) {}
+func (d *stubDialect) Name() dialect.Name {
+	if d.name == dialect.Invalid {
+		return dialect.SQLite
+	}
+	return d.name
+}
 func (d *stubDialect) Features() feature.Feature                                  { return feature.Returning }
 func (d *stubDialect) Tables() *schema.Tables                                     { return d.tables }
 func (d *stubDialect) OnTable(*schema.Table)                                      {}
@@ -205,6 +211,13 @@ var stubDriverSeq atomic.Int64
 // newTestService costruisce un Service sullo stub driver, senza lifecycle fx.
 func newTestService(t *testing.T) (*Service, *queryLog) {
 	t.Helper()
+	return newTestServiceDialect(t, dialect.Invalid)
+}
+
+// newTestServiceDialect è newTestService con il nome di dialetto indicato, per i rami che
+// dipendono da dialect.Name (oggi: Oracle).
+func newTestServiceDialect(t *testing.T, dn dialect.Name) (*Service, *queryLog) {
+	t.Helper()
 	log := &queryLog{}
 	name := "coresql-stub-" + t.Name() + "-" + strconv.FormatInt(stubDriverSeq.Add(1), 10)
 	sql.Register(name, &stubDriver{log: log})
@@ -213,7 +226,9 @@ func newTestService(t *testing.T) (*Service, *queryLog) {
 		t.Fatalf("sql.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = sqldb.Close() })
-	db := bun.NewDB(sqldb, newStubDialect())
+	d := newStubDialect()
+	d.name = dn
+	db := bun.NewDB(sqldb, d)
 	return &Service{db: db, idb: db}, log
 }
 
@@ -411,5 +426,72 @@ func TestGetPageByFilter_OrdinePerChiave(t *testing.T) {
 	}
 	if strings.Join(visti, "") != "abcde" {
 		t.Fatalf("righe per pagina = %v, attese a..e in ordine", visti)
+	}
+}
+
+// Oracle fino alla 19c rifiuta l'INSERT multi-riga che bun emette per una slice: InsertMany deve
+// fare un INSERT per riga, e tutti dentro una transazione, perché resti atomica come altrove.
+func TestServiceInsertMany_OracleUnaRigaPerInsertInTransazione(t *testing.T) {
+	s, log := newTestServiceDialect(t, dialect.Oracle)
+
+	objs := []*testRecord{{Id: "a"}, {Id: "b"}, {Id: "c"}}
+	if appErr := s.InsertMany[testRecord](t.Context(), objs); appErr != nil {
+		t.Fatalf("InsertMany: %v", appErr.Message)
+	}
+	var inserts []loggedQuery
+	for _, q := range log.queries {
+		if strings.HasPrefix(strings.ToUpper(q.sql), "INSERT") {
+			inserts = append(inserts, q)
+		}
+	}
+	if len(inserts) != len(objs) {
+		t.Fatalf("attese %d INSERT, ottenute %d: %v", len(objs), len(inserts), inserts)
+	}
+	for _, q := range inserts {
+		if !q.inTx {
+			t.Errorf("INSERT fuori transazione: %s", q.sql)
+		}
+		if strings.Count(q.sql, "VALUES (") != 1 || strings.Contains(q.sql, "), (") {
+			t.Errorf("INSERT multi-riga su Oracle: %s", q.sql)
+		}
+	}
+	if log.begins != 1 || log.commits != 1 {
+		t.Errorf("attesa una transazione (begin=%d commit=%d)", log.begins, log.commits)
+	}
+}
+
+// Dentro ExecTransaction InsertMany usa la transazione del chiamante, senza aprirne un'altra
+// (bun la anniderebbe con un savepoint, e Oracle non ha RELEASE SAVEPOINT).
+func TestServiceInsertMany_OracleDentroExecTransaction(t *testing.T) {
+	s, log := newTestServiceDialect(t, dialect.Oracle)
+
+	appErr := s.ExecTransaction(t.Context(), func(ctx context.Context, tx *Service) error {
+		if err := tx.InsertMany[testRecord](ctx, []*testRecord{{Id: "a"}, {Id: "b"}}); err != nil {
+			return err
+		}
+		return nil
+	})
+	if appErr != nil {
+		t.Fatalf("ExecTransaction: %v", appErr.Message)
+	}
+	if log.begins != 1 {
+		t.Errorf("attesa una sola transazione, aperte %d", log.begins)
+	}
+	for _, q := range log.queries {
+		if strings.Contains(strings.ToUpper(q.sql), "SAVEPOINT") {
+			t.Errorf("savepoint inatteso: %s", q.sql)
+		}
+	}
+}
+
+// Sugli altri dialetti resta l'INSERT multi-riga, fuori transazione.
+func TestServiceInsertMany_AltriDialettiUnaSolaInsert(t *testing.T) {
+	s, log := newTestService(t)
+
+	if appErr := s.InsertMany[testRecord](t.Context(), []*testRecord{{Id: "a"}, {Id: "b"}}); appErr != nil {
+		t.Fatalf("InsertMany: %v", appErr.Message)
+	}
+	if len(log.queries) != 1 || log.begins != 0 {
+		t.Fatalf("attesa una sola INSERT senza transazione, ottenute %d query e %d begin", len(log.queries), log.begins)
 	}
 }
