@@ -3,7 +3,7 @@ module github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-sql
 go 1.27.3
 
 require (
-	github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app v0.0.29-0.20261022100736-e9d4241f255c
+	github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app v0.0.29-0.20261023164504-295798846767
 	github.com/rs/zerolog v1.35.1
 	github.com/uptrace/bun v1.3.0
 	github.com/uptrace/bun/dialect/sqlitedialect v1.3.0
@@ -13,8 +13,8 @@ require (
 )
 
 require (
-	github.com/GPA-Gruppo-Progetti-Avanzati-SRL/tpm-common v0.1.96 // indirect
-	github.com/KimMachineGun/automemlimit v1.0.0 // indirect
+	github.com/GPA-Gruppo-Progetti-Avanzati-SRL/tpm-common v0.1.97 // indirect
+	github.com/KimMachineGun/automemlimit v1.0.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
