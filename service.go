@@ -3,6 +3,7 @@ package coresql
 import (
 	"context"
 	"database/sql"
+	"reflect"
 	"time"
 
 	core "github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app"
@@ -37,7 +38,24 @@ func (s *Service) IDB() bun.IDB { return s.idb }
 // ExecTransaction esegue fn dentro una transazione: rollback su errore, commit
 // al successo. fn riceve un *Service legato alla transazione, quindi al suo
 // interno si usano gli stessi metodi CRUD.
+//
+// Chiamata su un *Service già legato a una transazione (cioè dentro la fn di un altro
+// ExecTransaction) non ne apre una seconda: partecipa a quella del chiamante, e commit e rollback
+// restano suoi. Se fn ritorna un errore, ExecTransaction lo ritorna senza annullare nulla da sé:
+// sta al chiamante propagarlo, e il rollback è quello della chiamata più esterna. Non usa
+// savepoint, perché Oracle non ha RELEASE SAVEPOINT, che bun emette per una transazione annidata:
+// le scritture di una fn fallita restano nella transazione finché l'esterna non fa rollback. È la
+// stessa regola di InsertMany su Oracle.
+//
+// Prima apriva sempre una transazione nuova sul *bun.DB radice: una chiamata annidata girava su
+// un'altra connessione, indipendente, e il suo commit non seguiva il rollback dell'esterna.
 func (s *Service) ExecTransaction(ctx context.Context, fn func(ctx context.Context, tx *Service) error) *core.Error {
+	if s.inTx() {
+		if err := fn(ctx, s); err != nil {
+			return errs.Tech(CodeTransaction).WithCause(err)
+		}
+		return nil
+	}
 	if err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		return fn(ctx, &Service{db: s.db, idb: &tx})
 	}); err != nil {
@@ -45,6 +63,22 @@ func (s *Service) ExecTransaction(ctx context.Context, fn func(ctx context.Conte
 	}
 	return nil
 }
+
+// singlePK ritorna il nome della colonna della chiave primaria del modello, o "" se il modello non
+// ne ha una sola (nessuna, o composta).
+func (s *Service) singlePK(typ reflect.Type) string {
+	if typ.Kind() != reflect.Struct {
+		return ""
+	}
+	pks := s.db.Table(typ).PKs
+	if len(pks) != 1 {
+		return ""
+	}
+	return pks[0].Name
+}
+
+// inTx dice se il Service è legato a una transazione: idb è la *bun.Tx e non il *bun.DB.
+func (s *Service) inTx() bool { return s.idb != bun.IDB(s.db) }
 
 // serviceParams raccoglie le dipendenze di newService. Il dialect arriva da
 // dialectSource, supplita da Module: è una scelta compile-time dell'app (quale

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app"
 	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app/page"
@@ -248,8 +249,65 @@ func TestServiceGetByIdNotFound(t *testing.T) {
 		t.Error("NotFoundError deve conservare sql.ErrNoRows come causa")
 	}
 	got := log.last().sql
-	if !strings.Contains(got, "test_records") || !strings.Contains(got, "id = ") {
+	if !strings.Contains(got, "test_records") || !strings.Contains(got, `"id" = `) {
 		t.Fatalf("SQL inatteso: %s", got)
+	}
+}
+
+// recordChiaveMaiuscola ha la chiave primaria con un nome e un'iniziale diversi da "id": GetById
+// deve usare quella del modello, quotata come la scrive l'INSERT.
+type recordChiaveMaiuscola struct {
+	bun.BaseModel `bun:"table:giudici"`
+	IdGiudice     int64  `bun:"ID_GIUDICE,pk"`
+	Nome          string `bun:"nome"`
+}
+
+func (recordChiaveMaiuscola) GetTableName(context.Context) string { return "giudici" }
+
+// recordChiaveComposta non ha una chiave sola: GetById mantiene la colonna id di prima.
+type recordChiaveComposta struct {
+	bun.BaseModel `bun:"table:composti"`
+	A             string `bun:"a,pk"`
+	B             string `bun:"b,pk"`
+}
+
+func (recordChiaveComposta) GetTableName(context.Context) string { return "composti" }
+
+// GetById usa la chiave primaria del modello e la quota. Con la stringa fissa `id = ?` su Oracle
+// la colonna diventava ID non quotato: non trovava una colonna "id" minuscola (ORA-00904) ne' una
+// chiave con un altro nome.
+func TestServiceGetByIdUsaLaChiavePrimariaDelModello(t *testing.T) {
+	s, log := newTestService(t)
+
+	_, _ = s.GetById[recordChiaveMaiuscola](t.Context(), 7)
+	if got := log.last().sql; !strings.Contains(got, `"ID_GIUDICE" = `) {
+		t.Fatalf("la chiave primaria del modello non e' usata, quotata: %s", got)
+	}
+
+	_, _ = s.GetById[recordChiaveComposta](t.Context(), "x")
+	if got := log.last().sql; !strings.Contains(got, "id = ") || strings.Contains(got, `"a" = `) {
+		t.Fatalf("con una chiave composta atteso il ripiego su id: %s", got)
+	}
+}
+
+// Su un database vero: la chiave non si chiama id e la riga si legge.
+func TestServiceGetByIdChiaveDiversaDaId(t *testing.T) {
+	s := sqliteService(t)
+	if _, err := s.db.NewCreateTable().Model((*recordChiaveMaiuscola)(nil)).Exec(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if appErr := s.InsertOne(t.Context(), &recordChiaveMaiuscola{IdGiudice: 7, Nome: "Rossi"}); appErr != nil {
+		t.Fatal(appErr.Message)
+	}
+	got, appErr := s.GetById[recordChiaveMaiuscola](t.Context(), 7)
+	if appErr != nil {
+		t.Fatalf("GetById: %v", appErr.Message)
+	}
+	if got.Nome != "Rossi" {
+		t.Fatalf("riga letta = %+v", got)
+	}
+	if _, appErr := s.GetById[recordChiaveMaiuscola](t.Context(), 8); appErr == nil || appErr.StatusCode != 404 {
+		t.Fatalf("atteso 404 per una chiave assente, ottenuto %v", appErr)
 	}
 }
 
@@ -320,6 +378,102 @@ func TestServiceExecTransactionRollback(t *testing.T) {
 	}
 	if log.commits != 0 || log.rollbacks != 1 {
 		t.Fatalf("atteso rollback, ottenuti %d commit / %d rollback", log.commits, log.rollbacks)
+	}
+}
+
+// Un ExecTransaction dentro un altro partecipa alla transazione del chiamante: una sola begin, un
+// solo commit, e le query dell'interno girano sulla stessa tx. Prima ne apriva una seconda sul
+// *bun.DB radice.
+func TestServiceExecTransactionAnnidataPartecipa(t *testing.T) {
+	s, log := newTestService(t)
+
+	appErr := s.ExecTransaction(t.Context(), func(ctx context.Context, tx *Service) error {
+		if err := tx.InsertOne(ctx, &testRecord{Id: "esterna"}); err != nil {
+			return err
+		}
+		if err := tx.ExecTransaction(ctx, func(ctx context.Context, inner *Service) error {
+			if inner != tx {
+				t.Error("l'interno deve ricevere il Service della transazione esterna")
+			}
+			if err := inner.InsertOne(ctx, &testRecord{Id: "interna"}); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		return nil
+	})
+	if appErr != nil {
+		t.Fatalf("ExecTransaction: %v", appErr.Message)
+	}
+	if log.begins != 1 || log.commits != 1 || log.rollbacks != 0 {
+		t.Fatalf("attesi 1 begin / 1 commit / 0 rollback, ottenuti %d/%d/%d", log.begins, log.commits, log.rollbacks)
+	}
+	if !log.last().inTx {
+		t.Fatal("la query dell'interno non e' girata sulla tx")
+	}
+}
+
+// Un errore dell'interno propagato dal chiamante annulla l'intera transazione, e una sola.
+func TestServiceExecTransactionAnnidataErroreAnnullaTutto(t *testing.T) {
+	s, log := newTestService(t)
+
+	boom := errors.New("boom")
+	appErr := s.ExecTransaction(t.Context(), func(ctx context.Context, tx *Service) error {
+		if err := tx.InsertOne(ctx, &testRecord{Id: "esterna"}); err != nil {
+			return err
+		}
+		if err := tx.ExecTransaction(ctx, func(ctx context.Context, inner *Service) error {
+			if err := inner.InsertOne(ctx, &testRecord{Id: "interna"}); err != nil {
+				return err
+			}
+			return boom
+		}); err != nil {
+			return err
+		}
+		return nil
+	})
+	if appErr == nil || !errors.Is(appErr, boom) {
+		t.Fatalf("atteso l'errore dell'interno, ottenuto %v", appErr)
+	}
+	if log.begins != 1 || log.commits != 0 || log.rollbacks != 1 {
+		t.Fatalf("attesi 1 begin / 0 commit / 1 rollback, ottenuti %d/%d/%d", log.begins, log.commits, log.rollbacks)
+	}
+}
+
+// Su una sola connessione una transazione annidata aperta sul DB radice resterebbe in attesa per
+// sempre: la prova che l'interno usa davvero la transazione del chiamante.
+func TestServiceExecTransactionAnnidataStessaConnessione(t *testing.T) {
+	s := sqliteService(t) // un'unica connessione
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	boom := errors.New("boom")
+	appErr := s.ExecTransaction(ctx, func(ctx context.Context, tx *Service) error {
+		if err := tx.InsertOne(ctx, &persona{Id: "p1", Nome: "Ada"}); err != nil {
+			return err
+		}
+		if err := tx.ExecTransaction(ctx, func(ctx context.Context, inner *Service) error {
+			if err := inner.InsertOne(ctx, &persona{Id: "p2", Nome: "Bo"}); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		return boom // l'esterna annulla anche cio' che l'interna ha scritto
+	})
+	if appErr == nil || !errors.Is(appErr, boom) {
+		// Con una transazione annidata sul DB radice l'errore sarebbe il timeout del context.
+		t.Fatalf("atteso l'errore dell'esterna, ottenuto %v", appErr)
+	}
+	n, err := s.CountRows(t.Context(), tutteLePersone{})
+	if err != nil {
+		t.Fatalf("CountRows: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("dopo il rollback dell'esterna restano %d righe: la transazione interna era indipendente", n)
 	}
 }
 
