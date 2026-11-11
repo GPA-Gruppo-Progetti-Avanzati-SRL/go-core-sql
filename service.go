@@ -3,6 +3,7 @@ package coresql
 import (
 	"context"
 	"database/sql"
+	"reflect"
 	"time"
 
 	core "github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app"
@@ -61,6 +62,19 @@ func (s *Service) ExecTransaction(ctx context.Context, fn func(ctx context.Conte
 		return errs.Tech(CodeTransaction).WithCause(err)
 	}
 	return nil
+}
+
+// singlePK ritorna il nome della colonna della chiave primaria del modello, o "" se il modello non
+// ne ha una sola (nessuna, o composta).
+func (s *Service) singlePK(typ reflect.Type) string {
+	if typ.Kind() != reflect.Struct {
+		return ""
+	}
+	pks := s.db.Table(typ).PKs
+	if len(pks) != 1 {
+		return ""
+	}
+	return pks[0].Name
 }
 
 // inTx dice se il Service è legato a una transazione: idb è la *bun.Tx e non il *bun.DB.

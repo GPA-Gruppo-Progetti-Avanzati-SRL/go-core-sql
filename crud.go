@@ -24,15 +24,24 @@ import (
 // questi CRUD. Il data layer dell'app espone i propri metodi concreti (IData) e
 // richiama i metodi del Service al loro interno.
 
-// GetById retrieves a record by its primary key column "id".
-// For custom primary key names use GetByFilter.
+// GetById retrieves a record by its primary key.
+//
+// La colonna è quella della chiave primaria del modello (tag `bun:"...,pk"`), scritta come bun la
+// scrive nell'INSERT: quotata e con le maiuscole del tag. Era la stringa fissa `id = ?`, che su
+// Oracle diventa ID non quotato e non trova una colonna "id" minuscola (ORA-00904: è il caso delle
+// tabelle create da bun, come "work_items" di go-core-batch), né una chiave che non si chiama id.
+// Un modello senza chiave primaria, o con una chiave composta, mantiene la colonna `id` di prima:
+// per una chiave composta si usa GetByFilter.
 func (s *Service) GetById[T IRecord](ctx context.Context, id any) (*T, *core.Error) {
 	var result T
 	table := result.GetTableName(ctx)
-	err := s.idb.NewSelect().
-		TableExpr("?", bun.Ident(table)).
-		Where("id = ?", id).
-		Scan(ctx, &result)
+	q := s.idb.NewSelect().TableExpr("?", bun.Ident(table))
+	if pk := s.singlePK(reflect.TypeFor[T]()); pk != "" {
+		q = q.Where("? = ?", bun.Ident(pk), id)
+	} else {
+		q = q.Where("id = ?", id)
+	}
+	err := q.Scan(ctx, &result)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errs.NotFound().WithCause(err)

@@ -249,8 +249,65 @@ func TestServiceGetByIdNotFound(t *testing.T) {
 		t.Error("NotFoundError deve conservare sql.ErrNoRows come causa")
 	}
 	got := log.last().sql
-	if !strings.Contains(got, "test_records") || !strings.Contains(got, "id = ") {
+	if !strings.Contains(got, "test_records") || !strings.Contains(got, `"id" = `) {
 		t.Fatalf("SQL inatteso: %s", got)
+	}
+}
+
+// recordChiaveMaiuscola ha la chiave primaria con un nome e un'iniziale diversi da "id": GetById
+// deve usare quella del modello, quotata come la scrive l'INSERT.
+type recordChiaveMaiuscola struct {
+	bun.BaseModel `bun:"table:giudici"`
+	IdGiudice     int64  `bun:"ID_GIUDICE,pk"`
+	Nome          string `bun:"nome"`
+}
+
+func (recordChiaveMaiuscola) GetTableName(context.Context) string { return "giudici" }
+
+// recordChiaveComposta non ha una chiave sola: GetById mantiene la colonna id di prima.
+type recordChiaveComposta struct {
+	bun.BaseModel `bun:"table:composti"`
+	A             string `bun:"a,pk"`
+	B             string `bun:"b,pk"`
+}
+
+func (recordChiaveComposta) GetTableName(context.Context) string { return "composti" }
+
+// GetById usa la chiave primaria del modello e la quota. Con la stringa fissa `id = ?` su Oracle
+// la colonna diventava ID non quotato: non trovava una colonna "id" minuscola (ORA-00904) ne' una
+// chiave con un altro nome.
+func TestServiceGetByIdUsaLaChiavePrimariaDelModello(t *testing.T) {
+	s, log := newTestService(t)
+
+	_, _ = s.GetById[recordChiaveMaiuscola](t.Context(), 7)
+	if got := log.last().sql; !strings.Contains(got, `"ID_GIUDICE" = `) {
+		t.Fatalf("la chiave primaria del modello non e' usata, quotata: %s", got)
+	}
+
+	_, _ = s.GetById[recordChiaveComposta](t.Context(), "x")
+	if got := log.last().sql; !strings.Contains(got, "id = ") || strings.Contains(got, `"a" = `) {
+		t.Fatalf("con una chiave composta atteso il ripiego su id: %s", got)
+	}
+}
+
+// Su un database vero: la chiave non si chiama id e la riga si legge.
+func TestServiceGetByIdChiaveDiversaDaId(t *testing.T) {
+	s := sqliteService(t)
+	if _, err := s.db.NewCreateTable().Model((*recordChiaveMaiuscola)(nil)).Exec(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if appErr := s.InsertOne(t.Context(), &recordChiaveMaiuscola{IdGiudice: 7, Nome: "Rossi"}); appErr != nil {
+		t.Fatal(appErr.Message)
+	}
+	got, appErr := s.GetById[recordChiaveMaiuscola](t.Context(), 7)
+	if appErr != nil {
+		t.Fatalf("GetById: %v", appErr.Message)
+	}
+	if got.Nome != "Rossi" {
+		t.Fatalf("riga letta = %+v", got)
+	}
+	if _, appErr := s.GetById[recordChiaveMaiuscola](t.Context(), 8); appErr == nil || appErr.StatusCode != 404 {
+		t.Fatalf("atteso 404 per una chiave assente, ottenuto %v", appErr)
 	}
 }
 
