@@ -151,7 +151,7 @@ func (s *Service) insertEach(ctx context.Context, n int, insert func(ctx context
 		return nil
 	}
 	var err error
-	if s.idb != bun.IDB(s.db) {
+	if s.inTx() {
 		err = run(ctx, s.idb)
 	} else {
 		err = s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error { return run(ctx, tx) })
